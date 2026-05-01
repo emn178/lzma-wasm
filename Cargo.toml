@@ -8,4 +8,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-lzma-rust2 = "0.16.2" # 请替换为实际版本号
+lzma-rust2 = "0.16.2"
