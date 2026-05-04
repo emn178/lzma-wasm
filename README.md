@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/lzma-wasm.svg)](https://www.npmjs.com/package/lzma-wasm)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
+**[View on GitHub](https://github.com/Wu-Yijun/lzma-wasm)** | **[View on npm](https://www.npmjs.com/package/lzma-wasm)**
+
 A high-performance, universal WebAssembly binding for the [`lzma-rust2`](https://github.com/hasenbanck/lzma-rust2) crate. It brings near-native LZMA, XZ, and LZIP compression and decompression to Node.js, modern browsers, and bundlers.
 
 ## Features
@@ -40,8 +42,8 @@ const { initWasm, compress, decompress } = require('lzma-wasm');
 ```html
 <script src="https://cdn.jsdelivr.net/npm/lzma-wasm/dist/iife/index.js"></script>
 <script>
-  // Exposed globally as `LzmaWasm`
-  const { initWasm, compress, decompress } = window.LzmaWasm;
+  // Exposed globally as `lzma_wasm`
+  const { initWasm, compress, decompress } = window.lzma_wasm;
 </script>
 ```
 

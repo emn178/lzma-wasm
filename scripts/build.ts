@@ -38,11 +38,12 @@ esbuild.buildSync({
 esbuild.buildSync({
     entryPoints: ['./lib/index.ts'],
     format: 'iife',
-    globalName: 'LzmaWasm', // 暴露给 window.LzmaWasm
+    globalName: 'lzma_wasm', // 暴露给 window.lzma_wasm
     outfile: './dist/iife/index.js',
     bundle: true,
     minify: true,
-    logOverride: { 'empty-import-meta': 'silent' }
+    logOverride: { 'empty-import-meta': 'silent' },
+    footer: { js: 'window.LzmaWasm = lzma_wasm;' }
 });
 
 console.log("📝 [4/4] 正在生成 TypeScript 声明文件 (.d.ts)...");
