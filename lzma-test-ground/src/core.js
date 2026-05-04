@@ -23,20 +23,21 @@ async function run(testName, initWasm, compress, decompress) {
 }
 
 /**
- * 高仿真测试数据生成器：生成约 2.5MB 的混合特征数据 (JSON字符串)
+ * 高仿真测试数据生成器：生成约 4MB 的混合特征数据 (JSON字符串)
  */
 function generateRealisticData() {
-  console.log("🛠️ 正在生成约 2.5MB 的高仿真测试数据...");
+  console.log("🛠️ 正在生成约 9MB 的高仿真测试数据...");
   const data = [];
   const loremIpsum = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(10);
 
-  for (let i = 0; i < 2000; i++) {
+  for (let i = 0; i < 5000; i++) {
     data.push({
       id: i,
       uuid: `user-${Math.random().toString(36).substring(2, 10)}`,
       role: i % 5 === 0 ? "admin" : "user",
       timestamp: Date.now() - i * 1000,
       profile: loremIpsum,
+      profile2: loremIpsum.slice(Math.floor(Math.random() * loremIpsum.length / 2), Math.floor(Math.random() * loremIpsum.length)),
       isActive: i % 2 === 0
     });
   }
@@ -94,15 +95,15 @@ async function bench(tagName, initWasm, compress, decompress, decompressToBuffer
 
   for (let i = 0; i < configs.length; i++) {
     const conf = configs[i];
-    console.log(`\n🔧 测试配置: ${conf.name} (格式: ${conf.format}, 级别: ${conf.level})`);
     // ========== 测试 1: 压缩 ==========
     let compressedData;
     const compressTime = await measureBlock(`Compress ${conf.name}`, async () => {
+      console.log(`🔧 测试配置: ${conf.name} (格式: ${conf.format}, 级别: ${conf.level})`);
       compressedData = compress(rawData, { format: conf.format, level: conf.level });
-    }, 2); // 压缩较慢，迭代 2 次即可
+    }, 5); // 压缩较慢，迭代 5 次即可
 
     const compSizeKB = (compressedData.length / 1024).toFixed(2);
-    const ratio = ((compressedData.length / rawData.length) * 100).toFixed(1) + "%";
+    const ratio = ((compressedData.length / rawData.length) * 100).toFixed(4) + "%";
 
     // ========== 测试 2: 动态内存解压 ==========
     const decompressDynamicTime = await measureBlock(`Decompress Dynamic ${conf.name}`, async () => {
@@ -110,10 +111,9 @@ async function bench(tagName, initWasm, compress, decompress, decompressToBuffer
     }, 20); // 解压快，迭代 20 次
 
     // ========== 测试 3: Zero-Allocation 解压 ==========
-    // 注意：假设你的 decompressToBuffer 签名是 (compressed, outBuffer)
     const decompressZeroAllocTime = await measureBlock(`Decompress Zero-Alloc ${conf.name}`, async () => {
       decompressToBuffer(compressedData, preAllocatedBuffer);
-    }, 5);
+    }, 20);
 
     // 收集这一轮的成绩
     results.push({
@@ -124,7 +124,7 @@ async function bench(tagName, initWasm, compress, decompress, decompressToBuffer
       "压缩耗时 (ms)": compressTime.toFixed(2),
       "解压耗时(动态) (ms)": decompressDynamicTime.toFixed(2),
       "解压耗时(零分配) (ms)": decompressZeroAllocTime.toFixed(2),
-      "零分配提速": `+${(((decompressDynamicTime - decompressZeroAllocTime) / decompressDynamicTime) * 100).toFixed(1)}%`
+      "零分配提速": `${decompressDynamicTime > decompressZeroAllocTime ? "+" : ""}${(((decompressDynamicTime - decompressZeroAllocTime) / decompressDynamicTime) * 100).toFixed(1)}%`
     });
   }
 

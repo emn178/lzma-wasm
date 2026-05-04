@@ -15,7 +15,18 @@ let isReady = false;
 const MEM_LIMIT = 1024 * 1024 * 256; // 默认 256MB 内存限制，防止恶意文件导致 OOM
 
 /**
- * 初始化 Wasm 环境 (必须在使用其他 API 前调用)
+ * Initializes the WebAssembly environment.
+ * * **CRITICAL:** This function must be awaited and resolved before calling any other
+ * compression or decompression APIs. It safely handles cross-platform Wasm instantiation
+ * for both Node.js and Browser environments.
+ * * It is safe to call this multiple times; subsequent calls will immediately return
+ * if the environment is already initialized.
+ * 
+ * @returns {Promise<void>} A promise that resolves when the Wasm module is ready to use.
+ * @example
+ * import { initWasm, compress } from 'lzma-wasm-universal';
+ * await initWasm();
+ * const compressed = compress(data);
  */
 export async function initWasm(): Promise<void> {
   if (isReady) return;
@@ -40,15 +51,35 @@ export async function initWasm(): Promise<void> {
   isReady = true;
 }
 
+/**
+ * Configuration options for the decompression process.
+ */
 export interface DecompressOptions {
-  /** 预期输出大小，提供此项启用 Zero-Allocation 极致性能模式 */
+  /** * The exact expected size of the uncompressed data in bytes.
+   * * **⚡ Performance Tip:** Providing this value enables the "Zero-Allocation" 
+   * high-performance mode. The library will pre-allocate the exact required memory 
+   * in JavaScript and instruct WebAssembly to write directly into it, avoiding 
+   * internal Rust vector resizing and reducing cross-boundary memory copying.
+   */
   expectedSize?: number;
-  /** 内存限制(字节)，防止恶意文件导致 OOM */
+  /** * The maximum amount of memory (in bytes) the Wasm decompressor is allowed to allocate.
+   * * This acts as a crucial safeguard against malicious, highly-compressed files 
+   * (e.g., Zip Bombs) that could cause Out-Of-Memory (OOM) crashes.
+   * 
+   * @default 268435456 (256 MB)
+   */
   memLimit?: number;
 }
 
 /**
- * 通用解压接口
+ * Decompresses LZMA, XZ, or LZIP binary data.
+ * * The function automatically detects the compression format based on the magic headers
+ * of the provided compressed data.
+ * 
+ * @param {Uint8Array} compressed - The compressed binary data.
+ * @param {DecompressOptions} [options] - Optional configuration for decompression memory strategies.
+ * @returns {Uint8Array} A new Uint8Array containing the uncompressed data.
+ * @throws {Error} If the Wasm module is not initialized, the format is invalid, or memory limits are exceeded.
  */
 export function decompress(
   compressed: Uint8Array,
@@ -73,6 +104,19 @@ export function decompress(
   }
 }
 
+/**
+ * Expert-level Decompression API (Zero-Allocation).
+ * * Decompresses data directly into a pre-allocated JavaScript `Uint8Array`.
+ * 
+ * dThis bypasses internal dynamic reallocation and minimizes GC (Garbage Collection) pressure, 
+ * making it ideal for high-frequency or extreme-performance scenarios (e.g., game assets, video streaming).
+ * 
+ * @param {Uint8Array} compressed - The compressed binary data.
+ * @param {Uint8Array} outBuffer - The pre-allocated destination buffer. It must be large enough to hold the uncompressed data.
+ * @param {number} [memLimit] - Optional memory limit in bytes to prevent OOM. If not provided, it defaults to the size of `outBuffer`.
+ * @returns {number} The actual number of bytes written to the `outBuffer`.
+ * @throws {Error} If the uncompressed data exceeds the size of `outBuffer` or if decompression fails.
+ */
 export function decompressToBuffer(
   compressed: Uint8Array,
   outBuffer: Uint8Array,
@@ -82,18 +126,33 @@ export function decompressToBuffer(
   return decompress_to_buffer(compressed, outBuffer, memLimit ?? outBuffer.length);
 }
 
+/**
+ * Configuration options for the compression process.
+ */
 export interface CompressOptions {
-  /** 压缩格式，推荐现代格式 'xz' 或 'lzip' */
+  /** The target compression format.
+   * - `'xz'`: (Recommended) Modern, highly efficient container format with integrity checks (CRC).
+   * - `'lzip'`: Designed for long-term archiving and data recovery reliability.
+   * - `'lzma'`: Legacy format (LZMA Alone), widely supported but lacks robust headers.
+   * * @default "xz"
+   */
   format?: "lzma" | "xz" | "lzip";
-  /** 压缩等级 0-9。0最快，9最小，默认为平衡点 6 */
+  /** The compression preset level, ranging from `0` to `9`.
+   * - `0-2`: Fastest compression speed, lowest memory usage, lower compression ratio.
+   * - `3-6`: Balanced performance. `6` is the standard default for most command-line tools.
+   * - `7-9`: Maximum compression ratio, extremely slow, highest memory usage.
+   * 
+   * @default 6
+   */
   level?: number;
 }
 
 /**
- * 将数据压缩为指定的 LZMA 家族格式
- * @param data 需要压缩的源数据 (Uint8Array)
- * @param options 格式与压缩等级配置
- * @returns 压缩后的二进制流
+ * Compresses binary data into the specified LZMA-family format.
+ * @param {Uint8Array} data - The raw, uncompressed binary data to be compressed.
+ * @param {CompressOptions} [options] - Configuration for the output format and compression level.
+ * @returns {Uint8Array} A new Uint8Array containing the compressed binary data.
+ * @throws {Error} If the Wasm module is not initialized or if the compression process fails.
  */
 export function compress(
   data: Uint8Array,

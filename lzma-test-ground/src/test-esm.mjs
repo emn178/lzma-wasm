@@ -1,5 +1,9 @@
-import { initWasm, compress, decompress } from 'lzma-wasm';
+import { initWasm, compress, decompress, decompressToBuffer } from 'lzma-wasm';
 
 import pkg from './core.js';
 
-pkg.run("ESM", initWasm, compress, decompress);
+await pkg.run("ESM", initWasm, compress, decompress);
+
+const result = await pkg.bench("ESM", initWasm, compress, decompress, decompressToBuffer);
+ 
+console.log("最终结果:", JSON.stringify(result, null, 2));
