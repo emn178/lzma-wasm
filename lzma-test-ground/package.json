@@ -5,6 +5,6 @@
     "@types/node": "^25.6.0"
   },
   "dependencies": {
-    "lzma-wasm": "file:..\\lzma-wasm-1.0.3.tgz"
+    "lzma-wasm": "file:..\\lzma-wasm-1.0.4.tgz"
   }
 }

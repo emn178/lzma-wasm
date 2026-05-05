@@ -6,6 +6,7 @@ import {
   decompress_dynamic,
   decompress_to_buffer,
   default as init,
+  initSync,
 } from "../pkg/lzma_wasm.js";
 // 引入由构建脚本动态生成的 base64 字符串
 import { WASM_BASE64 } from "./wasm-b64.js";
@@ -13,6 +14,22 @@ import { WASM_BASE64 } from "./wasm-b64.js";
 let isReady = false;
 
 const MEM_LIMIT = 1024 * 1024 * 256; // 默认 256MB 内存限制，防止恶意文件导致 OOM
+
+function getWasmBytes(): Uint8Array{
+  // 跨环境 Base64 解码逻辑
+  if (typeof Buffer !== "undefined") {
+    // Node.js 环境：极速解码
+    return Buffer.from(WASM_BASE64, "base64");
+  } else {
+    // 浏览器 / Deno 环境：原生 atob 解码
+    const str = atob(WASM_BASE64);
+    const wasmBytes = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) {
+      wasmBytes[i] = str.charCodeAt(i);
+    }
+    return wasmBytes;
+  }
+}
 
 /**
  * Initializes the WebAssembly environment.
@@ -31,23 +48,34 @@ const MEM_LIMIT = 1024 * 1024 * 256; // 默认 256MB 内存限制，防止恶意
 export async function initWasm(): Promise<void> {
   if (isReady) return;
 
-  let wasmBytes: Uint8Array;
-
-  // 跨环境 Base64 解码逻辑
-  if (typeof Buffer !== "undefined") {
-    // Node.js 环境：极速解码
-    wasmBytes = Buffer.from(WASM_BASE64, "base64");
-  } else {
-    // 浏览器 / Deno 环境：原生 atob 解码
-    const str = atob(WASM_BASE64);
-    wasmBytes = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) {
-      wasmBytes[i] = str.charCodeAt(i);
-    }
-  }
+  let wasmBytes: Uint8Array = getWasmBytes();
 
   // 将字节流喂给 wasm-bindgen 的 init 函数
   await init({ module_or_path: wasmBytes });
+  isReady = true;
+}
+
+
+/**
+ * Initializes the WebAssembly environment.
+ * * **CRITICAL:** This function must be awaited and resolved before calling any other
+ * compression or decompression APIs. It safely handles cross-platform Wasm instantiation
+ * for both Node.js and Browser environments.
+ * * It is safe to call this multiple times; subsequent calls will immediately return
+ * if the environment is already initialized.
+ * 
+ * @returns {void} Returns when it is ready to use.
+ * @example
+ * import { initWasmSync, compress } from 'lzma-wasm-universal';
+ * initWasmSync();
+ * const compressed = compress(data);
+ */
+export function initWasmSync(): void {
+  if (isReady) return;
+
+  let wasmBytes: Uint8Array = getWasmBytes();
+  // 将字节流喂给 wasm-bindgen 的 init 函数
+  initSync({ module: wasmBytes });
   isReady = true;
 }
 
@@ -108,7 +136,7 @@ export function decompress(
  * Expert-level Decompression API (Zero-Allocation).
  * * Decompresses data directly into a pre-allocated JavaScript `Uint8Array`.
  * 
- * dThis bypasses internal dynamic reallocation and minimizes GC (Garbage Collection) pressure, 
+ * This bypasses internal dynamic reallocation and minimizes GC (Garbage Collection) pressure, 
  * making it ideal for high-frequency or extreme-performance scenarios (e.g., game assets, video streaming).
  * 
  * @param {Uint8Array} compressed - The compressed binary data.

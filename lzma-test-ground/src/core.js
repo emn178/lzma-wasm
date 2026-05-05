@@ -30,7 +30,7 @@ function generateRealisticData() {
   const data = [];
   const loremIpsum = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. ".repeat(10);
 
-  for (let i = 0; i < 5000; i++) {
+  for (let i = 0; i < 500; i++) {
     data.push({
       id: i,
       uuid: `user-${Math.random().toString(36).substring(2, 10)}`,
