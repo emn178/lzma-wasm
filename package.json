@@ -1,6 +1,6 @@
 {
   "name": "lzma-wasm",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "author": "Aluria",
   "description": "High-performance universal LZMA/XZ/LZIP compressor & decompressor in WebAssembly (Rust bindings)",
   "keywords": [

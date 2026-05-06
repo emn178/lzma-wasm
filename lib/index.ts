@@ -151,7 +151,7 @@ export function decompressToBuffer(
   memLimit?: number,
 ): number {
   if (!isReady) throw new Error("Please call `initWasm()` and wait for initialization to complete first");
-  return decompress_to_buffer(compressed, outBuffer, memLimit ?? outBuffer.length);
+  return decompress_to_buffer(compressed, outBuffer, memLimit ?? MEM_LIMIT);
 }
 
 /**
