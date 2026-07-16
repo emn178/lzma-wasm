@@ -2,6 +2,7 @@
 /target/
 /node_modules/
 /dist/
+/pkg/
 /*.tgz
 # will be auto build in Github Actions
 /lib/wasm-b64.ts

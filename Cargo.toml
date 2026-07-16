@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2.120"
-lzma-rust2 = "0.16.2"
+lzma-rust2 = "0.16.5"
 
 # [package.metadata.wasm-pack.profile.release]
 # wasm-opt = ["--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

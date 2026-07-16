@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>lzma-wasm external smoke</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      const out = document.getElementById("out");
+      const params = new URLSearchParams(location.search);
+      const mode = params.get("mode") || "main";
+
+      async function runMain() {
+        const base = location.origin;
+        const wasmUrl = `${base}/wasm/lzma_wasm_bg.wasm`;
+        const mod = await import(`${base}/esm/external.js`);
+
+        const [a, b] = await Promise.all([
+          mod.initWasm(wasmUrl),
+          mod.initWasm(wasmUrl),
+        ]);
+        if (a !== b) throw new Error("concurrent init did not share module");
+
+        const payload = new TextEncoder().encode("browser roundtrip");
+        const compressed = mod.compress(payload, { format: "xz", level: 1 });
+        const roundtrip = mod.decompress(compressed);
+        if (new TextDecoder().decode(roundtrip) !== "browser roundtrip") {
+          throw new Error("page roundtrip failed");
+        }
+
+        return { ok: true };
+      }
+
+      async function runWorker() {
+        const base = location.origin;
+        const wasmUrl = `${base}/wasm/lzma_wasm_bg.wasm`;
+        const workerCode = `
+          self.onmessage = async (ev) => {
+            const { base, wasmUrl } = ev.data;
+            const mod = await import(base + "/esm/external.js");
+            await mod.initWasm(wasmUrl);
+            const data = new Uint8Array([1, 2, 3, 4, 5]);
+            const compressed = mod.compress(data, { format: "lzip", level: 1 });
+            const decoded = mod.decompress(compressed);
+            self.postMessage({
+              ok:
+                decoded.length === 5 &&
+                decoded[0] === 1 &&
+                decoded[4] === 5,
+            });
+          };
+        `;
+        const worker = new Worker(
+          URL.createObjectURL(new Blob([workerCode], { type: "text/javascript" })),
+          { type: "module" },
+        );
+        const workerOk = await new Promise((resolve, reject) => {
+          worker.onmessage = (ev) => resolve(ev.data.ok);
+          worker.onerror = (err) => reject(err);
+          worker.postMessage({ base, wasmUrl });
+        });
+        worker.terminate();
+        if (!workerOk) throw new Error("worker roundtrip failed");
+        return { ok: true };
+      }
+
+      async function runRetry() {
+        const base = location.origin;
+        const wasmUrl = `${base}/wasm/lzma_wasm_bg.wasm`;
+        const bad = `${base}/wasm/missing.wasm`;
+        const bust = `?retry=${Date.now()}`;
+        const mod = await import(`${base}/esm/external.js${bust}`);
+        let firstError = "";
+        try {
+          await mod.initWasm(bad);
+        } catch (err) {
+          firstError = String(err);
+        }
+        if (!firstError) throw new Error("expected first init to fail");
+        await mod.initWasm(wasmUrl);
+        const outBytes = mod.decompress(
+          mod.compress(new Uint8Array([9]), { format: "xz", level: 0 }),
+        );
+        return { ok: outBytes[0] === 9, firstError };
+      }
+
+      try {
+        const result =
+          mode === "retry"
+            ? await runRetry()
+            : mode === "worker"
+              ? await runWorker()
+              : await runMain();
+        out.textContent = JSON.stringify(result);
+        window.__LZMA_TEST__ = result;
+      } catch (err) {
+        const fail = { ok: false, error: String(err) };
+        out.textContent = JSON.stringify(fail);
+        window.__LZMA_TEST__ = fail;
+      }
+    </script>
+  </body>
+</html>

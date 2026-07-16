@@ -43,16 +43,34 @@
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.cjs",
       "default": "./dist/esm/index.js"
-    }
+    },
+    "./external": {
+      "types": "./dist/external.d.ts",
+      "browser": {
+        "types": "./dist/external.d.ts",
+        "default": "./dist/esm/external.js"
+      },
+      "node": {
+        "types": "./dist/external-node.d.ts",
+        "import": "./dist/esm/external-node.js",
+        "require": "./dist/cjs/external-node.cjs",
+        "default": "./dist/esm/external-node.js"
+      },
+      "import": "./dist/esm/external.js",
+      "require": "./dist/cjs/external-node.cjs",
+      "default": "./dist/esm/external.js"
+    },
+    "./lzma_wasm_bg.wasm": "./dist/wasm/lzma_wasm_bg.wasm"
   },
   "files": [
     "dist",
     "README.md",
+    "VERSIONS.md",
     "LICENSE-MIT",
     "LICENSE-APACHE"
   ],
   "scripts": {
-    "build": "node ./scripts/build.ts",
+    "build": "node ./scripts/build.mjs",
     "tsc": "tsc",
     "prepublishOnly": "pnpm run build",
     "test": "vitest run"
@@ -60,6 +78,7 @@
   "devDependencies": {
     "@types/node": "^25.6.0",
     "esbuild": "^0.28.0",
+    "playwright": "^1.54.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   }

@@ -1,0 +1,38 @@
+[
+  {
+    "file": "xz-preset6.bin",
+    "format": "xz",
+    "preset": 6,
+    "tool": "xz xz (XZ Utils) 5.8.3",
+    "generation": "xz -z -c --format=xz -6 < source.txt",
+    "sourceSha256": "297a4f5bd3c0dbb5c9051422073cc9c798ad6037f99b0be2a05fdd18fa66793d",
+    "compressedSha256": "c7d3526905e0ff0dfe80485ea9f68205d0cb779dd47626f697b695b0ddd1739d"
+  },
+  {
+    "file": "lzma-preset6.bin",
+    "format": "lzma",
+    "preset": 6,
+    "tool": "xz xz (XZ Utils) 5.8.3",
+    "generation": "xz -z -c --format=lzma -6 < source.txt",
+    "sourceSha256": "297a4f5bd3c0dbb5c9051422073cc9c798ad6037f99b0be2a05fdd18fa66793d",
+    "compressedSha256": "701e2e6585d02e7d1841d40ef6a9888100a71db106608f460bb6156e35ae9060"
+  },
+  {
+    "file": "lzip-preset6.bin",
+    "format": "lzip",
+    "preset": 6,
+    "tool": "lzip lzip 1.26",
+    "generation": "lzip -c -6 < source.txt",
+    "sourceSha256": "297a4f5bd3c0dbb5c9051422073cc9c798ad6037f99b0be2a05fdd18fa66793d",
+    "compressedSha256": "abd95ad2583d780e483ad5f6ebb731bbbad5232a3c9d60e6f225d6f890ae85f3"
+  },
+  {
+    "file": "xz-empty.bin",
+    "format": "xz",
+    "preset": 6,
+    "tool": "xz (XZ Utils) 5.8.3",
+    "generation": "xz -z -c --format=xz < /dev/null",
+    "sourceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "compressedSha256": "0040f94d11d0039505328a90b2ff48968db873e9e7967307631bf40ef5679275"
+  }
+]

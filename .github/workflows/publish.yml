@@ -30,6 +30,7 @@ jobs:
             github.com:443
             api.github.com:443
             release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
             rustwasm.github.io:443
             crates.io:443
             index.crates.io:443
@@ -39,9 +40,18 @@ jobs:
             registry.npmjs.org:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
+            playwright.azureedge.net:443
+            playwright.download.prss.microsoft.com:443
+            cdn.playwright.dev:443
+            aka.ms:443
 
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Install pnpm
         uses: pnpm/action-setup@v6
@@ -64,10 +74,16 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install native compression tools (for testing)
-        run: sudo apt-get install -y lzip
-      
+        run: sudo apt-get update && sudo apt-get install -y xz-utils lzip
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Build package (For testing)
         run: pnpm run build
+
+      - name: Run Rust tests
+        run: cargo test
 
       - name: Run tests
         run: pnpm run test
