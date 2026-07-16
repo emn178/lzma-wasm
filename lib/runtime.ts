@@ -65,17 +65,23 @@ export interface CompressOptions {
   level?: number;
 }
 
-export interface XzStreamOptions {
+export type StreamFormat = "xz";
+
+export interface DecoderOptions {
+  /** Streaming container format. @default "xz" */
+  format?: StreamFormat;
   /** Maximum allowed decompressed output bytes across the complete stream. */
   maxOutputSize?: number;
 }
 
-export interface XzEncoderOptions {
+export interface EncoderOptions {
+  /** Streaming container format. @default "xz" */
+  format?: StreamFormat;
   /** Compression preset level, integer from 0 through 9. @default 6 */
   level?: number;
 }
 
-export interface XzStreamEncoder {
+export interface StreamEncoder {
   /** Supply the next uncompressed input chunk and return newly encoded bytes. */
   write(input: Uint8Array): Uint8Array;
   /** Finalize the XZ stream and return its remaining index and footer bytes. */
@@ -84,7 +90,7 @@ export interface XzStreamEncoder {
   close(): void;
 }
 
-export interface XzStreamDecoder {
+export interface StreamDecoder {
   /** Supply the next compressed input chunk and return newly decoded bytes. */
   write(input: Uint8Array): Uint8Array;
   /** Mark the input complete, validate the XZ footer, and return remaining bytes. */
@@ -180,6 +186,13 @@ function validateFormat(format: unknown): CompressFormat {
   );
 }
 
+function validateStreamFormat(format: unknown): StreamFormat {
+  if (format === undefined || format === "xz") return "xz";
+  throw new TypeError(
+    `streaming format must currently be "xz" (got ${String(format)})`,
+  );
+}
+
 export function createCodecApi(status: InitStatus) {
   function compress(
     data: Uint8Array,
@@ -270,8 +283,9 @@ export function createCodecApi(status: InitStatus) {
     return decompress_to_buffer(compressed, outBuffer, lzmaMemoryLimit);
   }
 
-  function createXzDecoder(options?: XzStreamOptions): XzStreamDecoder {
+  function createDecoder(options?: DecoderOptions): StreamDecoder {
     assertReady(status);
+    validateStreamFormat(options?.format);
     const maxOutputSize = validateNonNegSafeInt(
       "maxOutputSize",
       options?.maxOutputSize,
@@ -315,8 +329,9 @@ export function createCodecApi(status: InitStatus) {
     };
   }
 
-  function createXzEncoder(options?: XzEncoderOptions): XzStreamEncoder {
+  function createEncoder(options?: EncoderOptions): StreamEncoder {
     assertReady(status);
+    validateStreamFormat(options?.format);
     const level = validateLevel(options?.level);
     const encoder = new WasmXzStreamEncoder(level);
     let closed = false;
@@ -356,7 +371,7 @@ export function createCodecApi(status: InitStatus) {
     };
   }
 
-  return { compress, decompress, decompressToBuffer, createXzDecoder, createXzEncoder };
+  return { compress, decompress, decompressToBuffer, createDecoder, createEncoder };
 }
 
 export function beginAsyncInit(

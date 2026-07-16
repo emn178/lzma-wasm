@@ -2,8 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import {
   compress,
-  createXzDecoder,
-  createXzEncoder,
+  createDecoder,
+  createEncoder,
   decompress,
   decompressToBuffer,
   initWasm,
@@ -69,7 +69,7 @@ describe("API correctness", () => {
     const compressed = compress(data, { format: "xz", level: 1 });
 
     for (const chunkSize of [7, 1024, 65536]) {
-      const decoder = createXzDecoder();
+      const decoder = createDecoder({ format: "xz" });
       const output: Uint8Array[] = [];
       let emittedBeforeFinish = false;
       for (let offset = 0; offset < compressed.byteLength; offset += chunkSize) {
@@ -88,7 +88,7 @@ describe("API correctness", () => {
     const oneShot = compress(data, { format: "xz", level: 3 });
 
     for (const chunkSize of [7, 4093, 65536]) {
-      const encoder = createXzEncoder({ level: 3 });
+      const encoder = createEncoder({ format: "xz", level: 3 });
       const output: Uint8Array[] = [];
       for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
         output.push(encoder.write(data.subarray(offset, offset + chunkSize)));
@@ -101,20 +101,23 @@ describe("API correctness", () => {
   }, 120_000);
 
   it("validates incremental XZ compression options and lifecycle", () => {
-    expect(() => createXzEncoder({ level: -1 })).toThrow(/level/i);
-    expect(() => createXzEncoder({ level: 10 })).toThrow(/level/i);
+    expect(() => createEncoder({ level: -1 })).toThrow(/level/i);
+    expect(() => createEncoder({ level: 10 })).toThrow(/level/i);
+    expect(() =>
+      createEncoder({ format: "lzip" as unknown as "xz" }),
+    ).toThrow(/streaming format/i);
 
-    const empty = createXzEncoder({ level: 1 });
+    const empty = createEncoder({ level: 1 });
     const compressed = empty.finish();
     expect(decompress(compressed)).toHaveLength(0);
     expect(() => empty.finish()).toThrow(/closed/i);
 
-    const closed = createXzEncoder();
+    const closed = createEncoder();
     closed.close();
     closed.close();
     expect(() => closed.write(new Uint8Array())).toThrow(/closed/i);
 
-    const invalid = createXzEncoder();
+    const invalid = createEncoder();
     expect(() => invalid.write("not bytes" as unknown as Uint8Array)).toThrow(
       /Uint8Array/i,
     );
@@ -126,17 +129,20 @@ describe("API correctness", () => {
     const data = seededBytes("xz-stream-errors", 4096);
     const compressed = compress(data, { format: "xz", level: 1 });
 
-    const truncated = createXzDecoder();
+    const truncated = createDecoder();
     truncated.write(compressed.subarray(0, compressed.byteLength - 1));
     expect(() => truncated.finish()).toThrow(/truncated|incomplete/i);
 
     const corruptBytes = compressed.slice();
     corruptBytes[corruptBytes.byteLength - 3] ^= 0xff;
-    const corrupt = createXzDecoder();
+    const corrupt = createDecoder();
     corrupt.write(corruptBytes);
     expect(() => corrupt.finish()).toThrow();
 
-    const limited = createXzDecoder({ maxOutputSize: data.byteLength - 1 });
+    const limited = createDecoder({
+      format: "xz",
+      maxOutputSize: data.byteLength - 1,
+    });
     expect(() => {
       for (let offset = 0; offset < compressed.byteLength; offset += 7) {
         limited.write(compressed.subarray(offset, offset + 7));
@@ -144,10 +150,13 @@ describe("API correctness", () => {
       limited.finish();
     }).toThrow(/maxOutputSize/i);
 
-    const closed = createXzDecoder();
+    const closed = createDecoder();
     closed.close();
     closed.close();
     expect(() => closed.write(new Uint8Array())).toThrow(/closed/i);
+    expect(() =>
+      createDecoder({ format: "lzip" as unknown as "xz" }),
+    ).toThrow(/streaming format/i);
   });
 
   it(

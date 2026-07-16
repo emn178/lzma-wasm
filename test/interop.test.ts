@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { compress, createXzDecoder, decompress, initWasm } from "../lib/index.ts";
+import { compress, createDecoder, decompress, initWasm } from "../lib/index.ts";
 
 const fixturesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -102,7 +102,7 @@ describe("Native interoperability", () => {
     const compressed = nativeCompress(data, "xz", 6);
 
     for (const chunkSize of [31, 4093, 65536]) {
-      const decoder = createXzDecoder();
+      const decoder = createDecoder({ format: "xz" });
       const output: Buffer[] = [];
       let emittedBeforeFinish = false;
       for (let offset = 0; offset < compressed.byteLength; offset += chunkSize) {

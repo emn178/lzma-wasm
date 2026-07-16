@@ -11,10 +11,11 @@ export type {
   CompressOptions,
   DecompressOptions,
   DecompressToBufferOptions,
-  XzStreamDecoder,
-  XzStreamEncoder,
-  XzEncoderOptions,
-  XzStreamOptions,
+  DecoderOptions,
+  EncoderOptions,
+  StreamDecoder,
+  StreamEncoder,
+  StreamFormat,
 } from "./runtime.js";
 export type { InitInput, InitOutput, SyncInitInput } from "./public-types.js";
 export { defaultWasmUrl };
@@ -35,5 +36,5 @@ export const initWasmSync = api.initWasmSync;
 export const compress = api.compress;
 export const decompress = api.decompress;
 export const decompressToBuffer = api.decompressToBuffer;
-export const createXzDecoder = api.createXzDecoder;
-export const createXzEncoder = api.createXzEncoder;
+export const createDecoder = api.createDecoder;
+export const createEncoder = api.createEncoder;

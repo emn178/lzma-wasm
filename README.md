@@ -188,10 +188,13 @@ decompressToBuffer(
 ## Incremental XZ Decompression
 
 ```js
-import { createXzDecoder, initWasm } from "lzma-wasm/external";
+import { createDecoder, initWasm } from "lzma-wasm/external";
 
 await initWasm();
-const decoder = createXzDecoder({ maxOutputSize: 512 * 1024 * 1024 });
+const decoder = createDecoder({
+  format: "xz",
+  maxOutputSize: 512 * 1024 * 1024,
+});
 
 for await (const inputChunk of compressedInput) {
   const outputChunk = decoder.write(inputChunk);
@@ -210,10 +213,10 @@ to release the decoder early after cancellation.
 ## Incremental XZ Compression
 
 ```js
-import { createXzEncoder, initWasm } from "lzma-wasm/external";
+import { createEncoder, initWasm } from "lzma-wasm/external";
 
 await initWasm();
-const encoder = createXzEncoder({ level: 6 });
+const encoder = createEncoder({ format: "xz", level: 6 });
 
 for await (const inputChunk of uncompressedInput) {
   const outputChunk = encoder.write(inputChunk);
