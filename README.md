@@ -14,11 +14,12 @@ Node.js, browsers, and bundlers.
 - Near-native performance via Rust / WebAssembly
 - Embedded WASM (Base64-inlined) for zero-config installs
 - Optional **external WASM** entry for Workers / bundlers that prefer a single `.wasm` asset
+- Incremental XZ decompression across arbitrary input chunk boundaries
 - Correct destination-buffer and output-limit handling
 - Accurate option semantics for LZMA-Alone memory limits vs decompressed output caps
 
-There is **no public streaming API** in this release. Applications that need streaming should
-buffer input explicitly.
+The streaming API currently covers XZ decompression. LZMA-Alone and LZIP, and all compression
+formats, retain their one-shot APIs.
 
 ## Install
 
@@ -107,6 +108,28 @@ decompressToBuffer(
 ```
 
 `outBuffer.byteLength` is the hard output ceiling. Undersized buffers throw.
+
+## Incremental XZ decompression
+
+```js
+import { createXzDecoder, initWasm } from "lzma-wasm/external";
+
+await initWasm();
+const decoder = createXzDecoder({ maxOutputSize: 512 * 1024 * 1024 });
+
+for await (const inputChunk of compressedInput) {
+  const outputChunk = decoder.write(inputChunk);
+  if (outputChunk.byteLength) consume(outputChunk);
+}
+
+const finalChunk = decoder.finish();
+if (finalChunk.byteLength) consume(finalChunk);
+```
+
+`write()` accepts arbitrary input boundaries and may return an empty chunk while an XZ or LZMA2
+structure is incomplete. `finish()` validates the complete stream, including block checksums,
+Index and footer; truncated input throws. Concatenated XZ streams are supported. Call `close()`
+to release the decoder early after cancellation.
 
 ## Compression options
 

@@ -135,6 +135,7 @@ describe("package contents", () => {
 import {
   initWasm,
   compress,
+  createXzDecoder,
   decompress,
   type DecompressOptions,
   type InitOutput,
@@ -156,6 +157,9 @@ export async function run(): Promise<Uint8Array> {
   const opts: DecompressOptions = { maxOutputSize: 1024 };
   assertOpts(opts);
   const bytes = compress(new Uint8Array([1, 2, 3]), { format: "xz", level: 1 });
+  const stream = createXzDecoder({ maxOutputSize: 1024 });
+  stream.write(bytes);
+  stream.finish();
   await initExternal(new URL("lzma-wasm/lzma_wasm_bg.wasm", import.meta.url));
   assertSync(bytes);
   return decompress(bytes, opts);

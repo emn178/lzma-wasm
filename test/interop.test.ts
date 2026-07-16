@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { compress, decompress, initWasm } from "../lib/index.ts";
+import { compress, createXzDecoder, decompress, initWasm } from "../lib/index.ts";
 
 const fixturesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -96,6 +96,25 @@ describe("Native interoperability", () => {
     if (!hasXz) console.warn("xz CLI missing; native XZ/LZMA tests will skip");
     if (!hasLzip) console.warn("lzip CLI missing; native LZIP tests will skip");
   });
+
+  it.skipIf(!hasXz)("incrementally decodes native XZ streams", () => {
+    const data = seededBytes("native-xz-stream", 512 * 1024);
+    const compressed = nativeCompress(data, "xz", 6);
+
+    for (const chunkSize of [31, 4093, 65536]) {
+      const decoder = createXzDecoder();
+      const output: Buffer[] = [];
+      let emittedBeforeFinish = false;
+      for (let offset = 0; offset < compressed.byteLength; offset += chunkSize) {
+        const chunk = decoder.write(compressed.subarray(offset, offset + chunkSize));
+        if (chunk.byteLength) emittedBeforeFinish = true;
+        output.push(Buffer.from(chunk));
+      }
+      output.push(Buffer.from(decoder.finish()));
+      expect(Buffer.concat(output)).toEqual(Buffer.from(data));
+      expect(emittedBeforeFinish).toBe(true);
+    }
+  }, 120_000);
 
   it("loads committed native fixtures", () => {
     const metaPath = path.join(fixturesDir, "manifest.json");

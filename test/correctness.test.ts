@@ -2,11 +2,23 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import {
   compress,
+  createXzDecoder,
   decompress,
   decompressToBuffer,
   initWasm,
   initWasmSync,
 } from "../lib/index.ts";
+
+function concat(chunks: Uint8Array[]): Uint8Array {
+  const size = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const output = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output;
+}
 
 function seededBytes(seed: string, length: number): Uint8Array {
   const out = new Uint8Array(length);
@@ -49,6 +61,53 @@ describe("API correctness", () => {
       "hex",
     );
     expect(decompress(emptyXz).byteLength).toBe(0);
+  });
+
+  it("incrementally decompresses XZ across arbitrary input boundaries", () => {
+    const data = seededBytes("xz-stream", 512 * 1024);
+    const compressed = compress(data, { format: "xz", level: 1 });
+
+    for (const chunkSize of [7, 1024, 65536]) {
+      const decoder = createXzDecoder();
+      const output: Uint8Array[] = [];
+      let emittedBeforeFinish = false;
+      for (let offset = 0; offset < compressed.byteLength; offset += chunkSize) {
+        const chunk = decoder.write(compressed.subarray(offset, offset + chunkSize));
+        if (chunk.byteLength) emittedBeforeFinish = true;
+        output.push(chunk);
+      }
+      output.push(decoder.finish());
+      expect(Buffer.from(concat(output))).toEqual(Buffer.from(data));
+      expect(emittedBeforeFinish).toBe(true);
+    }
+  }, 120_000);
+
+  it("validates incremental XZ completion, output limit, and lifecycle", () => {
+    const data = seededBytes("xz-stream-errors", 4096);
+    const compressed = compress(data, { format: "xz", level: 1 });
+
+    const truncated = createXzDecoder();
+    truncated.write(compressed.subarray(0, compressed.byteLength - 1));
+    expect(() => truncated.finish()).toThrow(/truncated|incomplete/i);
+
+    const corruptBytes = compressed.slice();
+    corruptBytes[corruptBytes.byteLength - 3] ^= 0xff;
+    const corrupt = createXzDecoder();
+    corrupt.write(corruptBytes);
+    expect(() => corrupt.finish()).toThrow();
+
+    const limited = createXzDecoder({ maxOutputSize: data.byteLength - 1 });
+    expect(() => {
+      for (let offset = 0; offset < compressed.byteLength; offset += 7) {
+        limited.write(compressed.subarray(offset, offset + 7));
+      }
+      limited.finish();
+    }).toThrow(/maxOutputSize/i);
+
+    const closed = createXzDecoder();
+    closed.close();
+    closed.close();
+    expect(() => closed.write(new Uint8Array())).toThrow(/closed/i);
   });
 
   it(

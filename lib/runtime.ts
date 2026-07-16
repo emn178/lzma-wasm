@@ -4,6 +4,7 @@ import {
   compress_xz,
   decompress_dynamic,
   decompress_to_buffer,
+  XzStreamDecoder as WasmXzStreamDecoder,
 } from "../pkg/lzma_wasm.js";
 import type { InitOutput } from "./public-types.js";
 
@@ -61,6 +62,20 @@ export interface CompressOptions {
    * @default 6
    */
   level?: number;
+}
+
+export interface XzStreamOptions {
+  /** Maximum allowed decompressed output bytes across the complete stream. */
+  maxOutputSize?: number;
+}
+
+export interface XzStreamDecoder {
+  /** Supply the next compressed input chunk and return newly decoded bytes. */
+  write(input: Uint8Array): Uint8Array;
+  /** Mark the input complete, validate the XZ footer, and return remaining bytes. */
+  finish(): Uint8Array;
+  /** Release the underlying WASM decoder without finishing the stream. */
+  close(): void;
 }
 
 export type InitStatus = {
@@ -240,7 +255,52 @@ export function createCodecApi(status: InitStatus) {
     return decompress_to_buffer(compressed, outBuffer, lzmaMemoryLimit);
   }
 
-  return { compress, decompress, decompressToBuffer };
+  function createXzDecoder(options?: XzStreamOptions): XzStreamDecoder {
+    assertReady(status);
+    const maxOutputSize = validateNonNegSafeInt(
+      "maxOutputSize",
+      options?.maxOutputSize,
+      { allowUndefined: true },
+    );
+    const decoder = new WasmXzStreamDecoder(maxOutputSize);
+    let closed = false;
+
+    function assertOpen(): void {
+      if (closed) throw new Error("XZ stream decoder is already closed");
+    }
+
+    return {
+      write(input: Uint8Array): Uint8Array {
+        assertOpen();
+        if (!(input instanceof Uint8Array)) {
+          throw new TypeError("XZ stream input must be a Uint8Array");
+        }
+        try {
+          return decoder.write(input);
+        } catch (error) {
+          closed = true;
+          decoder.free();
+          throw error;
+        }
+      },
+      finish(): Uint8Array {
+        assertOpen();
+        closed = true;
+        try {
+          return decoder.finish();
+        } finally {
+          decoder.free();
+        }
+      },
+      close(): void {
+        if (closed) return;
+        closed = true;
+        decoder.free();
+      },
+    };
+  }
+
+  return { compress, decompress, decompressToBuffer, createXzDecoder };
 }
 
 export function beginAsyncInit(

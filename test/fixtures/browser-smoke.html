@@ -41,8 +41,21 @@
             const mod = await import(base + "/esm/external.js");
             await mod.initWasm(wasmUrl);
             const data = new Uint8Array([1, 2, 3, 4, 5]);
-            const compressed = mod.compress(data, { format: "lzip", level: 1 });
-            const decoded = mod.decompress(compressed);
+            const compressed = mod.compress(data, { format: "xz", level: 1 });
+            const decoder = mod.createXzDecoder();
+            const chunks = [];
+            for (let offset = 0; offset < compressed.length; offset += 3) {
+              chunks.push(decoder.write(compressed.subarray(offset, offset + 3)));
+            }
+            chunks.push(decoder.finish());
+            const decoded = new Uint8Array(
+              chunks.reduce((size, chunk) => size + chunk.length, 0),
+            );
+            let outputOffset = 0;
+            for (const chunk of chunks) {
+              decoded.set(chunk, outputOffset);
+              outputOffset += chunk.length;
+            }
             self.postMessage({
               ok:
                 decoded.length === 5 &&
