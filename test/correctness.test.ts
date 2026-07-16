@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   compress,
   createXzDecoder,
+  createXzEncoder,
   decompress,
   decompressToBuffer,
   initWasm,
@@ -81,6 +82,45 @@ describe("API correctness", () => {
       expect(emittedBeforeFinish).toBe(true);
     }
   }, 120_000);
+
+  it("incrementally compresses one XZ stream across arbitrary input boundaries", () => {
+    const data = seededBytes("xz-encode-stream", 512 * 1024);
+    const oneShot = compress(data, { format: "xz", level: 3 });
+
+    for (const chunkSize of [7, 4093, 65536]) {
+      const encoder = createXzEncoder({ level: 3 });
+      const output: Uint8Array[] = [];
+      for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+        output.push(encoder.write(data.subarray(offset, offset + chunkSize)));
+      }
+      output.push(encoder.finish());
+      const compressed = concat(output);
+      expect(Buffer.from(compressed)).toEqual(Buffer.from(oneShot));
+      expect(Buffer.from(decompress(compressed))).toEqual(Buffer.from(data));
+    }
+  }, 120_000);
+
+  it("validates incremental XZ compression options and lifecycle", () => {
+    expect(() => createXzEncoder({ level: -1 })).toThrow(/level/i);
+    expect(() => createXzEncoder({ level: 10 })).toThrow(/level/i);
+
+    const empty = createXzEncoder({ level: 1 });
+    const compressed = empty.finish();
+    expect(decompress(compressed)).toHaveLength(0);
+    expect(() => empty.finish()).toThrow(/closed/i);
+
+    const closed = createXzEncoder();
+    closed.close();
+    closed.close();
+    expect(() => closed.write(new Uint8Array())).toThrow(/closed/i);
+
+    const invalid = createXzEncoder();
+    expect(() => invalid.write("not bytes" as unknown as Uint8Array)).toThrow(
+      /Uint8Array/i,
+    );
+    expect(() => invalid.write(new Uint8Array())).not.toThrow();
+    invalid.close();
+  });
 
   it("validates incremental XZ completion, output limit, and lifecycle", () => {
     const data = seededBytes("xz-stream-errors", 4096);

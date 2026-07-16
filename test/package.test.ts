@@ -136,6 +136,7 @@ import {
   initWasm,
   compress,
   createXzDecoder,
+  createXzEncoder,
   decompress,
   type DecompressOptions,
   type InitOutput,
@@ -157,6 +158,9 @@ export async function run(): Promise<Uint8Array> {
   const opts: DecompressOptions = { maxOutputSize: 1024 };
   assertOpts(opts);
   const bytes = compress(new Uint8Array([1, 2, 3]), { format: "xz", level: 1 });
+  const encoder = createXzEncoder({ level: 1 });
+  encoder.write(new Uint8Array([1, 2]));
+  encoder.finish();
   const stream = createXzDecoder({ maxOutputSize: 1024 });
   stream.write(bytes);
   stream.finish();

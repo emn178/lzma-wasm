@@ -13,6 +13,8 @@ export type {
   DecompressOptions,
   DecompressToBufferOptions,
   XzStreamDecoder,
+  XzStreamEncoder,
+  XzEncoderOptions,
   XzStreamOptions,
 } from "./runtime.js";
 export type { InitInput, InitOutput, SyncInitInput } from "./public-types.js";
@@ -54,5 +56,6 @@ export function createExternalInit(loadDefault: () => Promise<InitInput> | InitI
     decompress: api.decompress,
     decompressToBuffer: api.decompressToBuffer,
     createXzDecoder: api.createXzDecoder,
+    createXzEncoder: api.createXzEncoder,
   };
 }

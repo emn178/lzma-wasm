@@ -14,12 +14,12 @@ Node.js, browsers, and bundlers.
 - Near-native performance via Rust / WebAssembly
 - Embedded WASM (Base64-inlined) for zero-config installs
 - Optional **external WASM** entry for Workers / bundlers that prefer a single `.wasm` asset
-- Incremental XZ decompression across arbitrary input chunk boundaries
+- Incremental XZ compression and decompression across arbitrary input chunk boundaries
 - Correct destination-buffer and output-limit handling
 - Accurate option semantics for LZMA-Alone memory limits vs decompressed output caps
 
-The streaming API currently covers XZ decompression. LZMA-Alone and LZIP, and all compression
-formats, retain their one-shot APIs.
+The streaming API covers XZ compression and decompression. LZMA-Alone and LZIP retain their
+one-shot APIs.
 
 ## Install
 
@@ -130,6 +130,27 @@ if (finalChunk.byteLength) consume(finalChunk);
 structure is incomplete. `finish()` validates the complete stream, including block checksums,
 Index and footer; truncated input throws. Concatenated XZ streams are supported. Call `close()`
 to release the decoder early after cancellation.
+
+## Incremental XZ compression
+
+```js
+import { createXzEncoder, initWasm } from "lzma-wasm/external";
+
+await initWasm();
+const encoder = createXzEncoder({ level: 6 });
+
+for await (const inputChunk of uncompressedInput) {
+  const outputChunk = encoder.write(inputChunk);
+  if (outputChunk.byteLength) consume(outputChunk);
+}
+
+const finalChunk = encoder.finish();
+if (finalChunk.byteLength) consume(finalChunk);
+```
+
+All `write()` calls share one XZ stream and compression dictionary. A call may return an empty
+chunk while the encoder buffers data. `finish()` emits the remaining compressed data, Index and
+footer. Call `close()` to release the encoder without finalizing it after cancellation.
 
 ## Compression options
 

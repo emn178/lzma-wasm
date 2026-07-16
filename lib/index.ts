@@ -14,6 +14,8 @@ export type {
   DecompressOptions,
   DecompressToBufferOptions,
   XzStreamDecoder,
+  XzStreamEncoder,
+  XzEncoderOptions,
   XzStreamOptions,
 } from "./runtime.js";
 export type { InitInput, InitOutput, SyncInitInput } from "./public-types.js";
@@ -59,3 +61,4 @@ export const compress = api.compress;
 export const decompress = api.decompress;
 export const decompressToBuffer = api.decompressToBuffer;
 export const createXzDecoder = api.createXzDecoder;
+export const createXzEncoder = api.createXzEncoder;

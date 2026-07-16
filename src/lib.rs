@@ -404,6 +404,113 @@ struct XzStreamDecoderInner {
     max_output_size: Option<usize>,
 }
 
+#[derive(Default)]
+struct DrainWriter {
+    output: Vec<u8>,
+}
+
+impl DrainWriter {
+    fn take(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.output)
+    }
+}
+
+impl Write for DrainWriter {
+    fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+        self.output.extend_from_slice(input);
+        Ok(input.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+struct XzStreamEncoderInner {
+    writer: Option<XzWriter<DrainWriter>>,
+    failed: bool,
+    finished: bool,
+}
+
+impl XzStreamEncoderInner {
+    fn new(level: u32) -> Result<Self, String> {
+        if level > 9 {
+            return Err(format!(
+                "level must be an integer from 0 through 9 (got {level})"
+            ));
+        }
+        let mut options = XzOptions::default();
+        options.lzma_options.set_preset(level);
+        let writer = XzWriter::new(DrainWriter::default(), options)
+            .map_err(|error| format!("Failed to initialize XZ writer: {error}"))?;
+        Ok(Self {
+            writer: Some(writer),
+            failed: false,
+            finished: false,
+        })
+    }
+
+    fn writer(&mut self) -> Result<&mut XzWriter<DrainWriter>, String> {
+        if self.failed {
+            return Err("XZ encoder cannot be reused after an error".to_string());
+        }
+        if self.finished {
+            return Err("XZ encoder has already finished".to_string());
+        }
+        self.writer
+            .as_mut()
+            .ok_or_else(|| "XZ encoder is closed".to_string())
+    }
+
+    fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, String> {
+        let writer = self.writer()?;
+        if let Err(error) = writer.write_all(input) {
+            self.failed = true;
+            return Err(format!("XZ streaming compression failed: {error}"));
+        }
+        Ok(writer.inner_mut().take())
+    }
+
+    fn finish(&mut self) -> Result<Vec<u8>, String> {
+        self.writer()?;
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| "XZ encoder is closed".to_string())?;
+        self.finished = true;
+        match writer.finish() {
+            Ok(mut output) => Ok(output.take()),
+            Err(error) => {
+                self.failed = true;
+                Err(format!("XZ streaming finalization failed: {error}"))
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct XzStreamEncoder {
+    inner: XzStreamEncoderInner,
+}
+
+#[wasm_bindgen]
+impl XzStreamEncoder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(level: u32) -> Result<Self, JsValue> {
+        XzStreamEncoderInner::new(level)
+            .map(|inner| Self { inner })
+            .map_err(to_js_err)
+    }
+
+    pub fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, JsValue> {
+        self.inner.write(input).map_err(to_js_err)
+    }
+
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner.finish().map_err(to_js_err)
+    }
+}
+
 impl XzStreamDecoderInner {
     fn new(max_output_size: Option<u32>) -> Self {
         Self {
@@ -1036,6 +1143,42 @@ mod tests {
         }
         output.extend(decoder.finish()?);
         Ok(output)
+    }
+
+    fn stream_encode(input: &[u8], chunk_size: usize) -> Result<Vec<u8>, String> {
+        let mut encoder = XzStreamEncoderInner::new(3)?;
+        let mut output = Vec::new();
+        for chunk in input.chunks(chunk_size) {
+            output.extend(encoder.write(chunk)?);
+        }
+        output.extend(encoder.finish()?);
+        Ok(output)
+    }
+
+    #[test]
+    fn xz_stream_encoder_preserves_one_stream_across_chunks() {
+        let payload: Vec<u8> = (0..200_000).map(|index| (index % 251) as u8).collect();
+        for chunk_size in [1, 7, 1024, 65536] {
+            let compressed = stream_encode(&payload, chunk_size)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            let output = decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            assert_eq!(output, payload, "chunk size {chunk_size}");
+        }
+    }
+
+    #[test]
+    fn xz_stream_encoder_handles_empty_input_and_lifecycle() {
+        let mut encoder = XzStreamEncoderInner::new(1).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(
+            decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(encoder.finish().unwrap_err().contains("finished"));
+        assert!(encoder.write(b"late").unwrap_err().contains("finished"));
+        assert!(XzStreamEncoderInner::new(10).is_err());
     }
 
     #[test]
