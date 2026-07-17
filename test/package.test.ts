@@ -158,7 +158,12 @@ export async function run(): Promise<Uint8Array> {
   const opts: DecompressOptions = { maxOutputSize: 1024 };
   assertOpts(opts);
   const bytes = compress(new Uint8Array([1, 2, 3]), { format: "xz", level: 1 });
-  const encoder = createEncoder({ format: "xz", level: 1 });
+  const encoder = createEncoder({
+    format: "xz",
+    level: 1,
+    dictionarySize: 256 * 1024,
+    blockSize: 1024 * 1024,
+  });
   encoder.write(new Uint8Array([1, 2]));
   encoder.finish();
   const stream = createDecoder({ format: "xz", maxOutputSize: 1024 });

@@ -11,6 +11,8 @@ import type { InitOutput } from "./public-types.js";
 
 const DEFAULT_LZMA_MEMORY_LIMIT = 1024 * 1024 * 256; // 256 MiB decoder memory for LZMA-Alone only
 const MAX_U32 = 0xffff_ffff;
+const DEFAULT_XZ_DICTIONARY_SIZE = 1024 * 1024;
+const DEFAULT_XZ_BLOCK_SIZE = 4 * 1024 * 1024;
 
 export type CompressFormat = "lzma" | "xz" | "lzip";
 
@@ -79,6 +81,18 @@ export interface EncoderOptions {
   format?: StreamFormat;
   /** Compression preset level, integer from 0 through 9. @default 6 */
   level?: number;
+  /**
+   * XZ/LZMA2 dictionary size in bytes. Must be at least 4096.
+   * @default 1048576 (1 MiB)
+   */
+  dictionarySize?: number;
+  /**
+   * Maximum uncompressed bytes per XZ block. Must be at least the effective
+   * dictionary size. When omitted, defaults to 4 MiB or the dictionary size,
+   * whichever is larger.
+   * @default 4194304 (4 MiB)
+   */
+  blockSize?: number;
 }
 
 export interface StreamEncoder {
@@ -191,6 +205,18 @@ function validateStreamFormat(format: unknown): StreamFormat {
   throw new TypeError(
     `streaming format must currently be "xz" (got ${String(format)})`,
   );
+}
+
+function validateOptionalSize(
+  name: string,
+  value: unknown,
+  minimum: number,
+): number | undefined {
+  const size = validateNonNegSafeInt(name, value, { allowUndefined: true });
+  if (size !== undefined && size < minimum) {
+    throw new RangeError(`${name} must be at least ${minimum} bytes`);
+  }
+  return size;
 }
 
 export function createCodecApi(status: InitStatus) {
@@ -308,18 +334,31 @@ export function createCodecApi(status: InitStatus) {
           return decoder.write(input);
         } catch (error) {
           closed = true;
-          decoder.free();
+          try {
+            decoder.free();
+          } catch {
+            // Preserve the decoding error if wasm-bindgen still considers the
+            // Rust value borrowed while unwinding the failed call.
+          }
           throw error;
         }
       },
       finish(): Uint8Array {
         assertOpen();
         closed = true;
+        let output: Uint8Array;
         try {
-          return decoder.finish();
-        } finally {
-          decoder.free();
+          output = decoder.finish();
+        } catch (error) {
+          try {
+            decoder.free();
+          } catch {
+            // Preserve the finalization error.
+          }
+          throw error;
         }
+        decoder.free();
+        return output;
       },
       close(): void {
         if (closed) return;
@@ -333,7 +372,17 @@ export function createCodecApi(status: InitStatus) {
     assertReady(status);
     validateStreamFormat(options?.format);
     const level = validateLevel(options?.level);
-    const encoder = new WasmXzStreamEncoder(level);
+    const dictionarySize = validateOptionalSize(
+      "dictionarySize",
+      options?.dictionarySize,
+      4096,
+    ) ?? DEFAULT_XZ_DICTIONARY_SIZE;
+    const blockSize = validateOptionalSize(
+      "blockSize",
+      options?.blockSize,
+      dictionarySize,
+    ) ?? Math.max(DEFAULT_XZ_BLOCK_SIZE, dictionarySize);
+    const encoder = new WasmXzStreamEncoder(level, dictionarySize, blockSize);
     let closed = false;
 
     function assertOpen(): void {
@@ -350,18 +399,31 @@ export function createCodecApi(status: InitStatus) {
           return encoder.write(input);
         } catch (error) {
           closed = true;
-          encoder.free();
+          try {
+            encoder.free();
+          } catch {
+            // Preserve the encoding error if wasm-bindgen still considers the
+            // Rust value borrowed while unwinding the failed call.
+          }
           throw error;
         }
       },
       finish(): Uint8Array {
         assertOpen();
         closed = true;
+        let output: Uint8Array;
         try {
-          return encoder.finish();
-        } finally {
-          encoder.free();
+          output = encoder.finish();
+        } catch (error) {
+          try {
+            encoder.free();
+          } catch {
+            // Preserve the finalization error.
+          }
+          throw error;
         }
+        encoder.free();
+        return output;
       },
       close(): void {
         if (closed) return;

@@ -4,6 +4,7 @@ use lzma_rust2::{
 };
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
+use std::num::NonZeroU64;
 use wasm_bindgen::prelude::*;
 
 const XZ_MAGIC: &[u8] = &[0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00];
@@ -433,7 +434,11 @@ struct XzStreamEncoderInner {
 }
 
 impl XzStreamEncoderInner {
-    fn new(level: u32) -> Result<Self, String> {
+    fn new(
+        level: u32,
+        dictionary_size: Option<u32>,
+        block_size: Option<u32>,
+    ) -> Result<Self, String> {
         if level > 9 {
             return Err(format!(
                 "level must be an integer from 0 through 9 (got {level})"
@@ -441,6 +446,21 @@ impl XzStreamEncoderInner {
         }
         let mut options = XzOptions::default();
         options.lzma_options.set_preset(level);
+        if let Some(dictionary_size) = dictionary_size {
+            if dictionary_size < 4096 {
+                return Err("dictionarySize must be at least 4096 bytes".to_string());
+            }
+            options.lzma_options.dict_size = dictionary_size;
+        }
+        if let Some(block_size) = block_size {
+            if block_size < options.lzma_options.dict_size {
+                return Err(format!(
+                    "blockSize must be at least dictionarySize ({} bytes)",
+                    options.lzma_options.dict_size
+                ));
+            }
+            options.set_block_size(NonZeroU64::new(block_size as u64));
+        }
         let writer = XzWriter::new(DrainWriter::default(), options)
             .map_err(|error| format!("Failed to initialize XZ writer: {error}"))?;
         Ok(Self {
@@ -496,8 +516,12 @@ pub struct XzStreamEncoder {
 #[wasm_bindgen]
 impl XzStreamEncoder {
     #[wasm_bindgen(constructor)]
-    pub fn new(level: u32) -> Result<Self, JsValue> {
-        XzStreamEncoderInner::new(level)
+    pub fn new(
+        level: u32,
+        dictionary_size: Option<u32>,
+        block_size: Option<u32>,
+    ) -> Result<Self, JsValue> {
+        XzStreamEncoderInner::new(level, dictionary_size, block_size)
             .map(|inner| Self { inner })
             .map_err(to_js_err)
     }
@@ -1146,7 +1170,7 @@ mod tests {
     }
 
     fn stream_encode(input: &[u8], chunk_size: usize) -> Result<Vec<u8>, String> {
-        let mut encoder = XzStreamEncoderInner::new(3)?;
+        let mut encoder = XzStreamEncoderInner::new(3, None, None)?;
         let mut output = Vec::new();
         for chunk in input.chunks(chunk_size) {
             output.extend(encoder.write(chunk)?);
@@ -1169,7 +1193,7 @@ mod tests {
 
     #[test]
     fn xz_stream_encoder_handles_empty_input_and_lifecycle() {
-        let mut encoder = XzStreamEncoderInner::new(1).unwrap();
+        let mut encoder = XzStreamEncoderInner::new(1, None, None).unwrap();
         let compressed = encoder.finish().unwrap();
         assert!(
             decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None)
@@ -1178,7 +1202,24 @@ mod tests {
         );
         assert!(encoder.finish().unwrap_err().contains("finished"));
         assert!(encoder.write(b"late").unwrap_err().contains("finished"));
-        assert!(XzStreamEncoderInner::new(10).is_err());
+        assert!(XzStreamEncoderInner::new(10, None, None).is_err());
+    }
+
+    #[test]
+    fn xz_stream_encoder_supports_custom_dictionary_and_multiple_blocks() {
+        let payload: Vec<u8> = (0..3_000_000).map(|index| (index % 251) as u8).collect();
+        let mut encoder =
+            XzStreamEncoderInner::new(6, Some(256 * 1024), Some(1024 * 1024)).unwrap();
+        let mut compressed = Vec::new();
+        for chunk in payload.chunks(64 * 1024) {
+            compressed.extend(encoder.write(chunk).unwrap());
+        }
+        compressed.extend(encoder.finish().unwrap());
+        let output = decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None).unwrap();
+        assert_eq!(output, payload);
+
+        assert!(XzStreamEncoderInner::new(6, Some(4095), None).is_err());
+        assert!(XzStreamEncoderInner::new(6, Some(256 * 1024), Some(128 * 1024)).is_err());
     }
 
     #[test]

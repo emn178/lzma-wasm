@@ -4,7 +4,13 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { compress, createDecoder, decompress, initWasm } from "../lib/index.ts";
+import {
+  compress,
+  createDecoder,
+  createEncoder,
+  decompress,
+  initWasm,
+} from "../lib/index.ts";
 
 const fixturesDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -114,6 +120,26 @@ describe("Native interoperability", () => {
       expect(Buffer.concat(output)).toEqual(Buffer.from(data));
       expect(emittedBeforeFinish).toBe(true);
     }
+  }, 120_000);
+
+  it.skipIf(!hasXz)("creates native-compatible multi-block XZ streams", () => {
+    const data = seededBytes("native-xz-blocks", 3 * 1024 * 1024);
+    const encoder = createEncoder({
+      format: "xz",
+      level: 6,
+      dictionarySize: 256 * 1024,
+      blockSize: 1024 * 1024,
+    });
+    const output: Buffer[] = [];
+    for (let offset = 0; offset < data.byteLength; offset += 64 * 1024) {
+      output.push(
+        Buffer.from(encoder.write(data.subarray(offset, offset + 64 * 1024))),
+      );
+    }
+    output.push(Buffer.from(encoder.finish()));
+    expect(Buffer.from(nativeDecompress(Buffer.concat(output), "xz"))).toEqual(
+      Buffer.from(data),
+    );
   }, 120_000);
 
   it("loads committed native fixtures", () => {

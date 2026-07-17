@@ -85,7 +85,16 @@ describe("API correctness", () => {
 
   it("incrementally compresses one XZ stream across arbitrary input boundaries", () => {
     const data = seededBytes("xz-encode-stream", 512 * 1024);
-    const oneShot = compress(data, { format: "xz", level: 3 });
+    const explicitDefaultEncoder = createEncoder({
+      format: "xz",
+      level: 3,
+      dictionarySize: 1024 * 1024,
+      blockSize: 4 * 1024 * 1024,
+    });
+    const expected = concat([
+      explicitDefaultEncoder.write(data),
+      explicitDefaultEncoder.finish(),
+    ]);
 
     for (const chunkSize of [7, 4093, 65536]) {
       const encoder = createEncoder({ format: "xz", level: 3 });
@@ -95,7 +104,7 @@ describe("API correctness", () => {
       }
       output.push(encoder.finish());
       const compressed = concat(output);
-      expect(Buffer.from(compressed)).toEqual(Buffer.from(oneShot));
+      expect(Buffer.from(compressed)).toEqual(Buffer.from(expected));
       expect(Buffer.from(decompress(compressed))).toEqual(Buffer.from(data));
     }
   }, 120_000);
@@ -106,6 +115,12 @@ describe("API correctness", () => {
     expect(() =>
       createEncoder({ format: "lzip" as unknown as "xz" }),
     ).toThrow(/streaming format/i);
+    expect(() => createEncoder({ dictionarySize: 4095 })).toThrow(
+      /dictionarySize/i,
+    );
+    expect(() =>
+      createEncoder({ dictionarySize: 256 * 1024, blockSize: 128 * 1024 }),
+    ).toThrow(/blockSize/i);
 
     const empty = createEncoder({ level: 1 });
     const compressed = empty.finish();
@@ -124,6 +139,22 @@ describe("API correctness", () => {
     expect(() => invalid.write(new Uint8Array())).not.toThrow();
     invalid.close();
   });
+
+  it("compresses XZ with a custom dictionary and multiple blocks", () => {
+    const data = seededBytes("xz-custom-blocks", 3 * 1024 * 1024);
+    const encoder = createEncoder({
+      format: "xz",
+      level: 6,
+      dictionarySize: 256 * 1024,
+      blockSize: 1024 * 1024,
+    });
+    const output: Uint8Array[] = [];
+    for (let offset = 0; offset < data.byteLength; offset += 64 * 1024) {
+      output.push(encoder.write(data.subarray(offset, offset + 64 * 1024)));
+    }
+    output.push(encoder.finish());
+    expect(Buffer.from(decompress(concat(output)))).toEqual(Buffer.from(data));
+  }, 120_000);
 
   it("validates incremental XZ completion, output limit, and lifecycle", () => {
     const data = seededBytes("xz-stream-errors", 4096);

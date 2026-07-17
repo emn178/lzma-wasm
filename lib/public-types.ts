@@ -62,7 +62,11 @@ export interface InitOutput {
   readonly xzstreamencoder_finish: (
     a: number,
   ) => [number, number, number, number];
-  readonly xzstreamencoder_new: (a: number) => [number, number, number];
+  readonly xzstreamencoder_new: (
+    a: number,
+    b: number,
+    c: number,
+  ) => [number, number, number];
   readonly xzstreamencoder_write: (
     a: number,
     b: number,

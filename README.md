@@ -216,7 +216,13 @@ to release the decoder early after cancellation.
 import { createEncoder, initWasm } from "lzma-wasm/external";
 
 await initWasm();
-const encoder = createEncoder({ format: "xz", level: 6 });
+const encoder = createEncoder({
+  format: "xz",
+  level: 6,
+  // Optional tuning; defaults to 1 MiB / 4 MiB:
+  // dictionarySize: 1024 * 1024,
+  // blockSize: 4 * 1024 * 1024,
+});
 
 for await (const inputChunk of uncompressedInput) {
   const outputChunk = encoder.write(inputChunk);
@@ -230,6 +236,12 @@ if (finalChunk.byteLength) consume(finalChunk);
 All `write()` calls share one XZ stream and compression dictionary. A call may return an empty
 chunk while the encoder buffers data. `finish()` emits the remaining compressed data, Index and
 footer. Call `close()` to release the encoder without finalizing it after cancellation.
+
+`dictionarySize` defaults to 1 MiB. A smaller dictionary reduces memory use and match-search
+work at the cost of compression ratio.
+`blockSize` creates multiple independently compressed blocks inside one XZ stream and must be at
+least as large as the effective dictionary. It defaults to 4 MiB, or the dictionary size when a
+larger custom dictionary is selected. Both values are expressed in bytes.
 
 ## Compression Options
 
