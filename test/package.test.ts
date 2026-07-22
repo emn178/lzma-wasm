@@ -85,6 +85,7 @@ describe("package contents", () => {
     "consumer TypeScript compiles against an unpacked package tarball",
     () => {
       const tmp = mkdtempSync(path.join(os.tmpdir(), "lzma-wasm-pack-"));
+      let tgzPath: string | undefined;
       try {
         const tgz = execSync("pnpm pack", {
           encoding: "utf8",
@@ -93,7 +94,7 @@ describe("package contents", () => {
           .trim()
           .split(/\s+/)
           .pop()!;
-        const tgzPath = path.resolve(root, tgz);
+        tgzPath = path.resolve(root, tgz);
         execSync(`tar -xzf "${tgzPath}" -C "${tmp}"`);
         const pkgRoot = path.join(tmp, "package");
 
@@ -122,7 +123,7 @@ describe("package contents", () => {
             {
               type: "module",
               dependencies: {
-                "lzma-wasm": `file:${pkgRoot}`,
+                "@emn178/lzma-wasm": `file:${pkgRoot}`,
               },
             },
             null,
@@ -140,11 +141,11 @@ import {
   decompress,
   type DecompressOptions,
   type InitOutput,
-} from "lzma-wasm";
+} from "@emn178/lzma-wasm";
 import {
   initWasm as initExternal,
   type SyncInitInput,
-} from "lzma-wasm/external";
+} from "@emn178/lzma-wasm/external";
 
 declare function assert(x: InitOutput): void;
 declare function assertOpts(x: DecompressOptions): void;
@@ -169,7 +170,7 @@ export async function run(): Promise<Uint8Array> {
   const stream = createDecoder({ format: "xz", maxOutputSize: 1024 });
   stream.write(bytes);
   stream.finish();
-  await initExternal(new URL("lzma-wasm/lzma_wasm_bg.wasm", import.meta.url));
+  await initExternal(import.meta.resolve("@emn178/lzma-wasm/lzma_wasm_bg.wasm"));
   assertSync(bytes);
   return decompress(bytes, opts);
 }
@@ -187,8 +188,7 @@ export async function run(): Promise<Uint8Array> {
         });
       } finally {
         rmSync(tmp, { recursive: true, force: true });
-        const packed = path.join(root, "lzma-wasm-1.0.7.tgz");
-        if (existsSync(packed)) rmSync(packed);
+        if (tgzPath && existsSync(tgzPath)) rmSync(tgzPath);
       }
     },
     120_000,

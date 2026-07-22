@@ -38,6 +38,7 @@ Recorded while preparing correctness / packaging improvements (2026-07-15).
 
 ## 2026-07-21 streaming encoder / memory-limit work
 
+- Fork package: `@emn178/lzma-wasm@1.1.0` (`https://github.com/emn178/lzma-wasm`).
 - Added streaming LZIP and LZMA-Alone encoders via `createEncoder({ format: "lzip" | "lzma" })`.
 - Split public types into `StreamEncoderFormat` / `StreamDecoderFormat` (decoder remains `"xz"`).
 - Fixed one-shot `lzmaMemoryLimit` bytes→KiB conversion at the Rust/`lzma-rust2` boundary.

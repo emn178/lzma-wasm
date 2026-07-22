@@ -1,9 +1,11 @@
-# lzma-wasm
+# @emn178/lzma-wasm
 
-[![npm version](https://img.shields.io/npm/v/lzma-wasm.svg)](https://www.npmjs.com/package/lzma-wasm)
+[![npm version](https://img.shields.io/npm/v/@emn178/lzma-wasm.svg)](https://www.npmjs.com/package/@emn178/lzma-wasm)
 [![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
-**[View on GitHub](https://github.com/Wu-Yijun/lzma-wasm)** | **[View on npm](https://www.npmjs.com/package/lzma-wasm)**
+**[View on GitHub](https://github.com/emn178/lzma-wasm)** | **[View on npm](https://www.npmjs.com/package/@emn178/lzma-wasm)**
+
+This package is maintained as a fork of the original [`lzma-wasm`](https://github.com/Wu-Yijun/lzma-wasm) project.
 
 A high-performance, universal WebAssembly binding for the [`lzma-rust2`](https://github.com/hasenbanck/lzma-rust2) crate (currently **0.16.5**). It brings near-native LZMA, XZ, and LZIP compression and decompression to Node.js, modern browsers, and bundlers.
 
@@ -30,10 +32,10 @@ One-shot compress/decompress remains available for all three formats.
 ## 📦 Installation
 
 ```bash
-npm install lzma-wasm
+npm install @emn178/lzma-wasm
 # or
-yarn add lzma-wasm
-pnpm add lzma-wasm
+yarn add @emn178/lzma-wasm
+pnpm add @emn178/lzma-wasm
 ```
 
 Git checkouts do **not** include built `dist/` or Wasm files because they are build outputs. Use a published npm package, or run `pnpm run build` and consume a packed `.tgz` after building.
@@ -44,17 +46,17 @@ This library ships with ES Modules, CommonJS, and IIFE builds, making it compati
 
 **1. ES Modules (Vite, Rollup, Deno, Node.js ESM)**
 ```javascript
-import { initWasm, compress, decompress } from 'lzma-wasm';
+import { initWasm, compress, decompress } from '@emn178/lzma-wasm';
 ```
 
 **2. CommonJS (Node.js)**
 ```javascript
-const { initWasm, compress, decompress } = require('lzma-wasm');
+const { initWasm, compress, decompress } = require('@emn178/lzma-wasm');
 ```
 
 **3. Browser / CDN (Raw HTML)**
 ```html
-<script src="https://cdn.jsdelivr.net/npm/lzma-wasm/dist/iife/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emn178/lzma-wasm/dist/iife/index.js"></script>
 <script>
   // Exposed globally as `lzma_wasm`
   const { initWasm, compress, decompress } = window.lzma_wasm;
@@ -68,7 +70,7 @@ const { initWasm, compress, decompress } = require('lzma-wasm');
 The asynchronous `initWasm` can be replaced by the synchronous function `initWasmSync`.
 
 ```javascript
-import { initWasm, compress, decompress } from 'lzma-wasm';
+import { initWasm, compress, decompress } from '@emn178/lzma-wasm';
 
 async function run() {
     // 1. Initialize the Wasm module
@@ -96,7 +98,7 @@ run();
 WASM bytes are Base64-inlined. No asset serving is required.
 
 ```js
-import { initWasm, compress, decompress } from "lzma-wasm";
+import { initWasm, compress, decompress } from "@emn178/lzma-wasm";
 
 await initWasm();
 const compressed = compress(data, { format: "xz", level: 6 });
@@ -109,23 +111,23 @@ call can retry. `initWasmSync()` throws if asynchronous initialization is alread
 ## External Wasm Entry
 
 ```js
-import { initWasm, compress, decompress } from "lzma-wasm/external";
+import { initWasm, compress, decompress } from "@emn178/lzma-wasm/external";
 
 // Browser/Worker: zero-arg uses the shipped `.wasm` URL next to this module.
 await initWasm();
 
-// Explicit URL (recommended for Workers / custom asset layouts):
-// await initWasm(new URL("lzma-wasm/lzma_wasm_bg.wasm", import.meta.url));
+// Explicit URL for a custom asset layout:
+// await initWasm(new URL("/assets/lzma_wasm_bg.wasm", location.href));
 ```
 
 Package paths:
 
-- JS: `lzma-wasm/external`
-- WASM: `lzma-wasm/lzma_wasm_bg.wasm` → `dist/wasm/lzma_wasm_bg.wasm`
+- JS: `@emn178/lzma-wasm/external`
+- WASM: `@emn178/lzma-wasm/lzma_wasm_bg.wasm` → `dist/wasm/lzma_wasm_bg.wasm`
 
 The external JS bundle does **not** embed a Base64 copy of the WASM.
 
-Export conditions for `lzma-wasm/external`:
+Export conditions for `@emn178/lzma-wasm/external`:
 
 | Condition | Entry | Notes |
 |-----------|-------|-------|
@@ -199,7 +201,7 @@ decompressToBuffer(
 ## Incremental XZ Decompression
 
 ```js
-import { createDecoder, initWasm } from "lzma-wasm/external";
+import { createDecoder, initWasm } from "@emn178/lzma-wasm/external";
 
 await initWasm();
 const decoder = createDecoder({
@@ -224,7 +226,7 @@ to release the decoder early after cancellation.
 ## Incremental Compression
 
 ```js
-import { createEncoder, initWasm } from "lzma-wasm/external";
+import { createEncoder, initWasm } from "@emn178/lzma-wasm/external";
 
 await initWasm();
 const encoder = createEncoder({

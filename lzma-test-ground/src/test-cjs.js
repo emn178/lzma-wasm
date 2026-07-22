@@ -1,4 +1,4 @@
-const { initWasm, compress, decompress, decompressToBuffer } = require('lzma-wasm');
+const { initWasm, compress, decompress, decompressToBuffer } = require('@emn178/lzma-wasm');
 
 const pkg = require('./core.js');
 

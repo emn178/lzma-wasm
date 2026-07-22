@@ -1,7 +1,10 @@
 {
-  "name": "lzma-wasm",
-  "version": "1.0.7",
-  "author": "Aluria",
+  "name": "@emn178/lzma-wasm",
+  "version": "1.1.0",
+  "author": "emn178",
+  "contributors": [
+    "Aluria"
+  ],
   "description": "High-performance universal LZMA/XZ/LZIP compressor & decompressor in WebAssembly (Rust bindings)",
   "keywords": [
     "lzma",
@@ -18,13 +21,16 @@
     "browser",
     "node"
   ],
-  "homepage": "https://github.com/Wu-Yijun/lzma-wasm#readme",
+  "homepage": "https://github.com/emn178/lzma-wasm#readme",
   "bugs": {
-    "url": "https://github.com/Wu-Yijun/lzma-wasm/issues"
+    "url": "https://github.com/emn178/lzma-wasm/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Wu-Yijun/lzma-wasm.git"
+    "url": "git+https://github.com/emn178/lzma-wasm.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "(MIT OR Apache-2.0)",
   "sideEffects": false,

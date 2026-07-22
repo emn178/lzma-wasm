@@ -1,4 +1,4 @@
-import { initWasmSync, compress, decompress, decompressToBuffer } from 'lzma-wasm';
+import { initWasmSync, compress, decompress, decompressToBuffer } from '@emn178/lzma-wasm';
 
 import pkg from './core.js';
 
