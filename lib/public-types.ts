@@ -19,6 +19,8 @@ export type SyncInitInput = BufferSource | WebAssembly.Module;
  */
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
+  readonly __wbg_lzipstreamencoder_free: (a: number, b: number) => void;
+  readonly __wbg_lzmastreamencoder_free: (a: number, b: number) => void;
   readonly __wbg_xzstreamdecoder_free: (a: number, b: number) => void;
   readonly __wbg_xzstreamencoder_free: (a: number, b: number) => void;
   readonly compress_lzip: (
@@ -50,6 +52,24 @@ export interface InitOutput {
     e: any,
     f: number,
   ) => [number, number, number];
+  readonly lzipstreamencoder_finish: (
+    a: number,
+  ) => [number, number, number, number];
+  readonly lzipstreamencoder_new: (a: number) => [number, number, number];
+  readonly lzipstreamencoder_write: (
+    a: number,
+    b: number,
+    c: number,
+  ) => [number, number, number, number];
+  readonly lzmastreamencoder_finish: (
+    a: number,
+  ) => [number, number, number, number];
+  readonly lzmastreamencoder_new: (a: number) => [number, number, number];
+  readonly lzmastreamencoder_write: (
+    a: number,
+    b: number,
+    c: number,
+  ) => [number, number, number, number];
   readonly xzstreamdecoder_finish: (
     a: number,
   ) => [number, number, number, number];

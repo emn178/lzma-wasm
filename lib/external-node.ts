@@ -14,7 +14,9 @@ export type {
   DecoderOptions,
   EncoderOptions,
   StreamDecoder,
+  StreamDecoderFormat,
   StreamEncoder,
+  StreamEncoderFormat,
   StreamFormat,
 } from "./runtime.js";
 export type { InitInput, InitOutput, SyncInitInput } from "./public-types.js";

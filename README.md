@@ -13,12 +13,19 @@ A high-performance, universal WebAssembly binding for the [`lzma-rust2`](https:/
 * **Universal & Zero-Config:** The Wasm binary is base64-inlined. **No `wasm-loader`, no static asset serving, and no Webpack/Vite configuration required.** Just import and use it anywhere.
 * **External Wasm Support:** An optional external-Wasm entry is available for Workers and bundlers that prefer a separately cached `.wasm` asset.
 * **Multi-Format Support:** Seamlessly supports `.xz` (modern, recommended), `.lzma` (legacy), and `.lz` (lzip) formats.
-* **Streaming XZ:** Incremental XZ compression and decompression across arbitrary input chunk boundaries.
+* **Streaming codec API:** Incremental XZ encode/decode; incremental LZIP and LZMA-Alone encode.
 * **Zero-Allocation Decompression:** Expert APIs are available to decompress directly into pre-allocated memory and reduce JavaScript Garbage Collection (GC) overhead.
 * **Safe & Robust:** Output-size limits help protect applications from unexpectedly large decompressed data. LZMA-Alone also supports a separate decoder-memory limit.
 
-The streaming API covers XZ compression and decompression. LZMA-Alone and LZIP retain their
-one-shot APIs.
+Streaming support matrix:
+
+| Format | Streaming encode | Streaming decode |
+|--------|------------------|------------------|
+| XZ | yes | yes |
+| LZIP | yes | not yet (upstream resumable LZMA1 required) |
+| LZMA-Alone | yes | not yet (upstream resumable LZMA1 required) |
+
+One-shot compress/decompress remains available for all three formats.
 
 ## 📦 Installation
 
@@ -173,7 +180,11 @@ Rules:
 - if both `expectedSize` and `maxOutputSize` are set, require `expectedSize <= maxOutputSize`
   or throw before allocating;
 - `maxOutputSize` is **not** a WASM-heap / dictionary-memory limit;
-- `lzmaMemoryLimit` does **not** protect XZ or LZIP.
+- `lzmaMemoryLimit` does **not** protect XZ or LZIP;
+- `lzmaMemoryLimit` / `memLimit` are expressed in **bytes**. The value is converted to KiB once
+  at the `lzma-rust2` boundary (`floor(bytes / 1024)`). This is a correctness fix: earlier
+  builds accidentally treated the byte value as KiB, so the documented 256 MiB default behaved
+  like 256 GiB.
 
 ```ts
 decompressToBuffer(
@@ -210,16 +221,16 @@ structure is incomplete. `finish()` validates the complete stream, including blo
 Index and footer; truncated input throws. Concatenated XZ streams are supported. Call `close()`
 to release the decoder early after cancellation.
 
-## Incremental XZ Compression
+## Incremental Compression
 
 ```js
 import { createEncoder, initWasm } from "lzma-wasm/external";
 
 await initWasm();
 const encoder = createEncoder({
-  format: "xz",
+  format: "xz", // or "lzip" / "lzma"
   level: 6,
-  // Optional tuning; defaults to 1 MiB / 4 MiB:
+  // XZ-only optional tuning; defaults to 1 MiB / 4 MiB:
   // dictionarySize: 1024 * 1024,
   // blockSize: 4 * 1024 * 1024,
 });
@@ -233,15 +244,20 @@ const finalChunk = encoder.finish();
 if (finalChunk.byteLength) consume(finalChunk);
 ```
 
-All `write()` calls share one XZ stream and compression dictionary. A call may return an empty
-chunk while the encoder buffers data. `finish()` emits the remaining compressed data, Index and
-footer. Call `close()` to release the encoder without finalizing it after cancellation.
+All `write()` calls share one encoder instance and codec state. A call may return an empty
+chunk while the encoder buffers data. `finish()` emits the remaining compressed bytes and
+format trailer. Call `close()` to release the encoder without finalizing it after cancellation.
 
-`dictionarySize` defaults to 1 MiB. A smaller dictionary reduces memory use and match-search
-work at the cost of compression ratio.
-`blockSize` creates multiple independently compressed blocks inside one XZ stream and must be at
-least as large as the effective dictionary. It defaults to 4 MiB, or the dictionary size when a
-larger custom dictionary is selected. Both values are expressed in bytes.
+For XZ, `dictionarySize` defaults to 1 MiB. A smaller dictionary reduces memory use and
+match-search work at the cost of compression ratio. `blockSize` creates multiple independently
+compressed blocks inside one XZ stream and must be at least as large as the effective
+dictionary. It defaults to 4 MiB, or the dictionary size when a larger custom dictionary is
+selected. Both values are expressed in bytes and are rejected for LZIP/LZMA-Alone streaming.
+
+Streaming LZMA-Alone uses an unknown-size `.lzma` header plus an end marker because the total
+input length is not known when the encoder is constructed. Byte-for-byte output may therefore
+differ from one-shot `compress(..., { format: "lzma" })`, which writes the known uncompressed
+size.
 
 ## Compression Options
 

@@ -4,6 +4,8 @@ import {
   compress_xz,
   decompress_dynamic,
   decompress_to_buffer,
+  LzipStreamEncoder as WasmLzipStreamEncoder,
+  LzmaStreamEncoder as WasmLzmaStreamEncoder,
   XzStreamDecoder as WasmXzStreamDecoder,
   XzStreamEncoder as WasmXzStreamEncoder,
 } from "../pkg/lzma_wasm.js";
@@ -67,29 +69,40 @@ export interface CompressOptions {
   level?: number;
 }
 
-export type StreamFormat = "xz";
+/** Formats accepted by `createEncoder()`. */
+export type StreamEncoderFormat = "xz" | "lzip" | "lzma";
+
+/**
+ * Formats accepted by `createDecoder()`.
+ * LZIP/LZMA-Alone streaming decode is gated on a resumable upstream LZMA1 API.
+ */
+export type StreamDecoderFormat = "xz";
+
+/** Backward-compatible umbrella alias for encoder formats. */
+export type StreamFormat = StreamEncoderFormat;
 
 export interface DecoderOptions {
   /** Streaming container format. @default "xz" */
-  format?: StreamFormat;
+  format?: StreamDecoderFormat;
   /** Maximum allowed decompressed output bytes across the complete stream. */
   maxOutputSize?: number;
 }
 
 export interface EncoderOptions {
   /** Streaming container format. @default "xz" */
-  format?: StreamFormat;
+  format?: StreamEncoderFormat;
   /** Compression preset level, integer from 0 through 9. @default 6 */
   level?: number;
   /**
    * XZ/LZMA2 dictionary size in bytes. Must be at least 4096.
+   * XZ only; rejected for LZIP and LZMA-Alone in this release.
    * @default 1048576 (1 MiB)
    */
   dictionarySize?: number;
   /**
    * Maximum uncompressed bytes per XZ block. Must be at least the effective
    * dictionary size. When omitted, defaults to 4 MiB or the dictionary size,
-   * whichever is larger.
+   * whichever is larger. XZ only; rejected for LZIP and LZMA-Alone.
    * @default 4194304 (4 MiB)
    */
   blockSize?: number;
@@ -98,7 +111,7 @@ export interface EncoderOptions {
 export interface StreamEncoder {
   /** Supply the next uncompressed input chunk and return newly encoded bytes. */
   write(input: Uint8Array): Uint8Array;
-  /** Finalize the XZ stream and return its remaining index and footer bytes. */
+  /** Finalize the stream and return remaining encoded bytes. */
   finish(): Uint8Array;
   /** Release the underlying WASM encoder without finishing the stream. */
   close(): void;
@@ -107,11 +120,17 @@ export interface StreamEncoder {
 export interface StreamDecoder {
   /** Supply the next compressed input chunk and return newly decoded bytes. */
   write(input: Uint8Array): Uint8Array;
-  /** Mark the input complete, validate the XZ footer, and return remaining bytes. */
+  /** Mark the input complete, validate the stream trailer, and return remaining bytes. */
   finish(): Uint8Array;
   /** Release the underlying WASM decoder without finishing the stream. */
   close(): void;
 }
+
+type WasmStreamHandle = {
+  write(input: Uint8Array): Uint8Array;
+  finish(): Uint8Array;
+  free(): void;
+};
 
 export type InitStatus = {
   isReady: boolean;
@@ -200,10 +219,20 @@ function validateFormat(format: unknown): CompressFormat {
   );
 }
 
-function validateStreamFormat(format: unknown): StreamFormat {
+function validateStreamEncoderFormat(format: unknown): StreamEncoderFormat {
+  if (format === undefined) return "xz";
+  if (format === "xz" || format === "lzma" || format === "lzip") {
+    return format;
+  }
+  throw new TypeError(
+    `streaming encoder format must be "xz", "lzma", or "lzip" (got ${String(format)})`,
+  );
+}
+
+function validateStreamDecoderFormat(format: unknown): StreamDecoderFormat {
   if (format === undefined || format === "xz") return "xz";
   throw new TypeError(
-    `streaming format must currently be "xz" (got ${String(format)})`,
+    `streaming decoder format "${String(format)}" is not available`,
   );
 }
 
@@ -217,6 +246,60 @@ function validateOptionalSize(
     throw new RangeError(`${name} must be at least ${minimum} bytes`);
   }
   return size;
+}
+
+function wrapStreamCodec(
+  label: string,
+  handle: WasmStreamHandle,
+): StreamEncoder | StreamDecoder {
+  let closed = false;
+
+  function assertOpen(): void {
+    if (closed) throw new Error(`${label} is already closed`);
+  }
+
+  return {
+    write(input: Uint8Array): Uint8Array {
+      assertOpen();
+      if (!(input instanceof Uint8Array)) {
+        throw new TypeError(`${label} input must be a Uint8Array`);
+      }
+      try {
+        return handle.write(input);
+      } catch (error) {
+        closed = true;
+        try {
+          handle.free();
+        } catch {
+          // Preserve the codec error if wasm-bindgen still considers the
+          // Rust value borrowed while unwinding the failed call.
+        }
+        throw error;
+      }
+    },
+    finish(): Uint8Array {
+      assertOpen();
+      closed = true;
+      let output: Uint8Array;
+      try {
+        output = handle.finish();
+      } catch (error) {
+        try {
+          handle.free();
+        } catch {
+          // Preserve the finalization error.
+        }
+        throw error;
+      }
+      handle.free();
+      return output;
+    },
+    close(): void {
+      if (closed) return;
+      closed = true;
+      handle.free();
+    },
+  };
 }
 
 export function createCodecApi(status: InitStatus) {
@@ -311,126 +394,67 @@ export function createCodecApi(status: InitStatus) {
 
   function createDecoder(options?: DecoderOptions): StreamDecoder {
     assertReady(status);
-    validateStreamFormat(options?.format);
+    validateStreamDecoderFormat(options?.format);
     const maxOutputSize = validateNonNegSafeInt(
       "maxOutputSize",
       options?.maxOutputSize,
       { allowUndefined: true },
     );
     const decoder = new WasmXzStreamDecoder(maxOutputSize);
-    let closed = false;
-
-    function assertOpen(): void {
-      if (closed) throw new Error("XZ stream decoder is already closed");
-    }
-
-    return {
-      write(input: Uint8Array): Uint8Array {
-        assertOpen();
-        if (!(input instanceof Uint8Array)) {
-          throw new TypeError("XZ stream input must be a Uint8Array");
-        }
-        try {
-          return decoder.write(input);
-        } catch (error) {
-          closed = true;
-          try {
-            decoder.free();
-          } catch {
-            // Preserve the decoding error if wasm-bindgen still considers the
-            // Rust value borrowed while unwinding the failed call.
-          }
-          throw error;
-        }
-      },
-      finish(): Uint8Array {
-        assertOpen();
-        closed = true;
-        let output: Uint8Array;
-        try {
-          output = decoder.finish();
-        } catch (error) {
-          try {
-            decoder.free();
-          } catch {
-            // Preserve the finalization error.
-          }
-          throw error;
-        }
-        decoder.free();
-        return output;
-      },
-      close(): void {
-        if (closed) return;
-        closed = true;
-        decoder.free();
-      },
-    };
+    return wrapStreamCodec("XZ stream decoder", decoder) as StreamDecoder;
   }
 
   function createEncoder(options?: EncoderOptions): StreamEncoder {
     assertReady(status);
-    validateStreamFormat(options?.format);
+    const format = validateStreamEncoderFormat(options?.format);
     const level = validateLevel(options?.level);
-    const dictionarySize = validateOptionalSize(
-      "dictionarySize",
-      options?.dictionarySize,
-      4096,
-    ) ?? DEFAULT_XZ_DICTIONARY_SIZE;
-    const blockSize = validateOptionalSize(
-      "blockSize",
-      options?.blockSize,
-      dictionarySize,
-    ) ?? Math.max(DEFAULT_XZ_BLOCK_SIZE, dictionarySize);
-    const encoder = new WasmXzStreamEncoder(level, dictionarySize, blockSize);
-    let closed = false;
 
-    function assertOpen(): void {
-      if (closed) throw new Error("XZ stream encoder is already closed");
+    if (format !== "xz") {
+      if (options?.dictionarySize !== undefined) {
+        throw new TypeError(
+          `dictionarySize is only supported for XZ streaming (got format "${format}")`,
+        );
+      }
+      if (options?.blockSize !== undefined) {
+        throw new TypeError(
+          `blockSize is only supported for XZ streaming (got format "${format}")`,
+        );
+      }
     }
 
-    return {
-      write(input: Uint8Array): Uint8Array {
-        assertOpen();
-        if (!(input instanceof Uint8Array)) {
-          throw new TypeError("XZ stream input must be a Uint8Array");
-        }
-        try {
-          return encoder.write(input);
-        } catch (error) {
-          closed = true;
-          try {
-            encoder.free();
-          } catch {
-            // Preserve the encoding error if wasm-bindgen still considers the
-            // Rust value borrowed while unwinding the failed call.
-          }
-          throw error;
-        }
-      },
-      finish(): Uint8Array {
-        assertOpen();
-        closed = true;
-        let output: Uint8Array;
-        try {
-          output = encoder.finish();
-        } catch (error) {
-          try {
-            encoder.free();
-          } catch {
-            // Preserve the finalization error.
-          }
-          throw error;
-        }
-        encoder.free();
-        return output;
-      },
-      close(): void {
-        if (closed) return;
-        closed = true;
-        encoder.free();
-      },
-    };
+    let encoder: WasmStreamHandle;
+    switch (format) {
+      case "xz": {
+        const dictionarySize =
+          validateOptionalSize(
+            "dictionarySize",
+            options?.dictionarySize,
+            4096,
+          ) ?? DEFAULT_XZ_DICTIONARY_SIZE;
+        const blockSize =
+          validateOptionalSize(
+            "blockSize",
+            options?.blockSize,
+            dictionarySize,
+          ) ?? Math.max(DEFAULT_XZ_BLOCK_SIZE, dictionarySize);
+        encoder = new WasmXzStreamEncoder(level, dictionarySize, blockSize);
+        break;
+      }
+      case "lzip":
+        encoder = new WasmLzipStreamEncoder(level);
+        break;
+      case "lzma":
+        encoder = new WasmLzmaStreamEncoder(level);
+        break;
+    }
+
+    const label =
+      format === "xz"
+        ? "XZ stream encoder"
+        : format === "lzip"
+          ? "LZIP stream encoder"
+          : "LZMA stream encoder";
+    return wrapStreamCodec(label, encoder) as StreamEncoder;
   }
 
   return { compress, decompress, decompressToBuffer, createDecoder, createEncoder };

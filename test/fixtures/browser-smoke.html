@@ -29,6 +29,27 @@
           throw new Error("page roundtrip failed");
         }
 
+        for (const format of ["lzip", "lzma"]) {
+          const encoder = mod.createEncoder({ format, level: 1 });
+          const parts = [
+            encoder.write(payload.subarray(0, 4)),
+            encoder.write(payload.subarray(4)),
+            encoder.finish(),
+          ];
+          const streamCompressed = new Uint8Array(
+            parts.reduce((size, chunk) => size + chunk.length, 0),
+          );
+          let offset = 0;
+          for (const chunk of parts) {
+            streamCompressed.set(chunk, offset);
+            offset += chunk.length;
+          }
+          const decoded = mod.decompress(streamCompressed);
+          if (new TextDecoder().decode(decoded) !== "browser roundtrip") {
+            throw new Error(`${format} streaming encode roundtrip failed`);
+          }
+        }
+
         return { ok: true };
       }
 

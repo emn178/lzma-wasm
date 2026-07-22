@@ -17,6 +17,11 @@ const fixturesDir = path.join(
   "fixtures",
 );
 
+const STREAM_FORMAT_HEADER_BYTES = {
+  lzip: 6,
+  lzma: 13,
+} as const;
+
 function checkSystemCommand(cmd: string): boolean {
   const res = spawnSync(cmd, ["--version"]);
   return res.status === 0;
@@ -141,6 +146,54 @@ describe("Native interoperability", () => {
       Buffer.from(data),
     );
   }, 120_000);
+
+  for (const level of [0, 6, 9] as const) {
+    it.skipIf(!hasLzip)(
+      `creates native-compatible streaming LZIP level ${level}`,
+      () => {
+        const data = seededBytes(`native-lzip-stream-${level}`, 4 * 1024 * 1024);
+        for (const chunkSize of [31, 4093, 65536]) {
+          const encoder = createEncoder({ format: "lzip", level });
+          const output: Buffer[] = [];
+          let beforeFinish = 0;
+          for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+            const chunk = encoder.write(data.subarray(offset, offset + chunkSize));
+            beforeFinish += chunk.byteLength;
+            output.push(Buffer.from(chunk));
+          }
+          expect(beforeFinish).toBeGreaterThan(STREAM_FORMAT_HEADER_BYTES.lzip);
+          output.push(Buffer.from(encoder.finish()));
+          expect(
+            Buffer.from(nativeDecompress(Buffer.concat(output), "lzip")),
+          ).toEqual(Buffer.from(data));
+        }
+      },
+      180_000,
+    );
+
+    it.skipIf(!hasXz)(
+      `creates native-compatible streaming LZMA-Alone level ${level}`,
+      () => {
+        const data = seededBytes(`native-lzma-stream-${level}`, 4 * 1024 * 1024);
+        for (const chunkSize of [31, 4093, 65536]) {
+          const encoder = createEncoder({ format: "lzma", level });
+          const output: Buffer[] = [];
+          let beforeFinish = 0;
+          for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+            const chunk = encoder.write(data.subarray(offset, offset + chunkSize));
+            beforeFinish += chunk.byteLength;
+            output.push(Buffer.from(chunk));
+          }
+          expect(beforeFinish).toBeGreaterThan(STREAM_FORMAT_HEADER_BYTES.lzma);
+          output.push(Buffer.from(encoder.finish()));
+          expect(
+            Buffer.from(nativeDecompress(Buffer.concat(output), "lzma")),
+          ).toEqual(Buffer.from(data));
+        }
+      },
+      180_000,
+    );
+  }
 
   it("loads committed native fixtures", () => {
     const metaPath = path.join(fixturesDir, "manifest.json");

@@ -32,5 +32,13 @@ Recorded while preparing correctness / packaging improvements (2026-07-15).
 
 ## Known limitations
 
-- No public streaming codec API.
+- Streaming decode is XZ-only until `lzma-rust2` exposes a resumable LZMA1 decoder (see
+  `jobs/DECODER_FEASIBILITY_BLOCKER.md`).
 - Git checkouts do not ship built `dist/`; consume a published package or build locally / use a packed `.tgz`.
+
+## 2026-07-21 streaming encoder / memory-limit work
+
+- Added streaming LZIP and LZMA-Alone encoders via `createEncoder({ format: "lzip" | "lzma" })`.
+- Split public types into `StreamEncoderFormat` / `StreamDecoderFormat` (decoder remains `"xz"`).
+- Fixed one-shot `lzmaMemoryLimit` bytes→KiB conversion at the Rust/`lzma-rust2` boundary.
+- Documented decoder feasibility blocker for true LZIP/LZMA streaming decode.

@@ -535,6 +535,175 @@ impl XzStreamEncoder {
     }
 }
 
+struct LzipStreamEncoderInner {
+    writer: Option<LzipWriter<DrainWriter>>,
+    failed: bool,
+    finished: bool,
+}
+
+impl LzipStreamEncoderInner {
+    fn new(level: u32) -> Result<Self, String> {
+        if level > 9 {
+            return Err(format!(
+                "level must be an integer from 0 through 9 (got {level})"
+            ));
+        }
+        let mut options = LzipOptions::default();
+        options.lzma_options.set_preset(level);
+        Ok(Self {
+            writer: Some(LzipWriter::new(DrainWriter::default(), options)),
+            failed: false,
+            finished: false,
+        })
+    }
+
+    fn writer(&mut self) -> Result<&mut LzipWriter<DrainWriter>, String> {
+        if self.failed {
+            return Err("LZIP encoder cannot be reused after an error".to_string());
+        }
+        if self.finished {
+            return Err("LZIP encoder has already finished".to_string());
+        }
+        self.writer
+            .as_mut()
+            .ok_or_else(|| "LZIP encoder is closed".to_string())
+    }
+
+    fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, String> {
+        let writer = self.writer()?;
+        if let Err(error) = writer.write_all(input) {
+            self.failed = true;
+            return Err(format!("LZIP streaming compression failed: {error}"));
+        }
+        Ok(writer.inner_mut().take())
+    }
+
+    fn finish(&mut self) -> Result<Vec<u8>, String> {
+        self.writer()?;
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| "LZIP encoder is closed".to_string())?;
+        self.finished = true;
+        match writer.finish() {
+            Ok(mut output) => Ok(output.take()),
+            Err(error) => {
+                self.failed = true;
+                Err(format!("LZIP streaming finalization failed: {error}"))
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct LzipStreamEncoder {
+    inner: LzipStreamEncoderInner,
+}
+
+#[wasm_bindgen]
+impl LzipStreamEncoder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(level: u32) -> Result<Self, JsValue> {
+        LzipStreamEncoderInner::new(level)
+            .map(|inner| Self { inner })
+            .map_err(to_js_err)
+    }
+
+    pub fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, JsValue> {
+        self.inner.write(input).map_err(to_js_err)
+    }
+
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner.finish().map_err(to_js_err)
+    }
+}
+
+struct LzmaStreamEncoderInner {
+    writer: Option<LzmaWriter<DrainWriter>>,
+    failed: bool,
+    finished: bool,
+}
+
+impl LzmaStreamEncoderInner {
+    fn new(level: u32) -> Result<Self, String> {
+        if level > 9 {
+            return Err(format!(
+                "level must be an integer from 0 through 9 (got {level})"
+            ));
+        }
+        let mut options = LzmaOptions::default();
+        options.set_preset(level);
+        // Unknown uncompressed size: emit end marker (streaming cannot know total size).
+        let writer = LzmaWriter::new_use_header(DrainWriter::default(), &options, None)
+            .map_err(|error| format!("Failed to initialize LZMA writer: {error}"))?;
+        Ok(Self {
+            writer: Some(writer),
+            failed: false,
+            finished: false,
+        })
+    }
+
+    fn writer(&mut self) -> Result<&mut LzmaWriter<DrainWriter>, String> {
+        if self.failed {
+            return Err("LZMA encoder cannot be reused after an error".to_string());
+        }
+        if self.finished {
+            return Err("LZMA encoder has already finished".to_string());
+        }
+        self.writer
+            .as_mut()
+            .ok_or_else(|| "LZMA encoder is closed".to_string())
+    }
+
+    fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, String> {
+        let writer = self.writer()?;
+        if let Err(error) = writer.write_all(input) {
+            self.failed = true;
+            return Err(format!("LZMA streaming compression failed: {error}"));
+        }
+        Ok(writer.inner_mut().take())
+    }
+
+    fn finish(&mut self) -> Result<Vec<u8>, String> {
+        self.writer()?;
+        let writer = self
+            .writer
+            .take()
+            .ok_or_else(|| "LZMA encoder is closed".to_string())?;
+        self.finished = true;
+        match writer.finish() {
+            Ok(mut output) => Ok(output.take()),
+            Err(error) => {
+                self.failed = true;
+                Err(format!("LZMA streaming finalization failed: {error}"))
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct LzmaStreamEncoder {
+    inner: LzmaStreamEncoderInner,
+}
+
+#[wasm_bindgen]
+impl LzmaStreamEncoder {
+    #[wasm_bindgen(constructor)]
+    pub fn new(level: u32) -> Result<Self, JsValue> {
+        LzmaStreamEncoderInner::new(level)
+            .map(|inner| Self { inner })
+            .map_err(to_js_err)
+    }
+
+    pub fn write(&mut self, input: &[u8]) -> Result<Vec<u8>, JsValue> {
+        self.inner.write(input).map_err(to_js_err)
+    }
+
+    pub fn finish(&mut self) -> Result<Vec<u8>, JsValue> {
+        self.inner.finish().map_err(to_js_err)
+    }
+}
+
 impl XzStreamDecoderInner {
     fn new(max_output_size: Option<u32>) -> Self {
         Self {
@@ -773,11 +942,22 @@ fn scan_lzip_members(data: &[u8]) -> Result<usize, String> {
     Ok(member_count)
 }
 
-fn detect_non_lzip_reader(compressed: &[u8], mem_limit: u32) -> Result<AutoReader<'_>, String> {
+/// Convert a public byte-based LZMA memory limit to the KiB argument expected by
+/// `lzma-rust2::LzmaReader::new_mem_limit`. Floor division ensures the effective
+/// allowance never exceeds the caller's byte limit.
+fn lzma_mem_limit_bytes_to_kb(mem_limit_bytes: u32) -> u32 {
+    mem_limit_bytes / 1024
+}
+
+fn detect_non_lzip_reader(
+    compressed: &[u8],
+    mem_limit_bytes: u32,
+) -> Result<AutoReader<'_>, String> {
     if compressed.starts_with(XZ_MAGIC) {
         Ok(AutoReader::Xz(XzReader::new(compressed, true)))
     } else {
-        LzmaReader::new_mem_limit(compressed, mem_limit, None)
+        let mem_limit_kb = lzma_mem_limit_bytes_to_kb(mem_limit_bytes);
+        LzmaReader::new_mem_limit(compressed, mem_limit_kb, None)
             .map(AutoReader::Lzma)
             .map_err(|e| format!("Decompression read failed: {e}"))
     }
@@ -857,24 +1037,24 @@ fn decompress_lzip_dynamic(
 fn decompress_to_buffer_inner(
     compressed: &[u8],
     out_buffer: &mut [u8],
-    mem_limit: u32,
+    mem_limit_bytes: u32,
 ) -> Result<usize, String> {
     if compressed.starts_with(LZIP_MAGIC) {
         return decompress_lzip_to_buffer(compressed, out_buffer);
     }
-    let mut reader = detect_non_lzip_reader(compressed, mem_limit)?;
+    let mut reader = detect_non_lzip_reader(compressed, mem_limit_bytes)?;
     read_into_buffer(&mut reader, out_buffer)
 }
 
 fn decompress_dynamic_inner(
     compressed: &[u8],
-    mem_limit: u32,
+    mem_limit_bytes: u32,
     max_output_size: Option<u32>,
 ) -> Result<Vec<u8>, String> {
     if compressed.starts_with(LZIP_MAGIC) {
         return decompress_lzip_dynamic(compressed, max_output_size);
     }
-    let mut reader = detect_non_lzip_reader(compressed, mem_limit)?;
+    let mut reader = detect_non_lzip_reader(compressed, mem_limit_bytes)?;
     read_dynamic(&mut reader, max_output_size)
 }
 
@@ -925,27 +1105,30 @@ fn to_js_err(err: String) -> JsValue {
 /// Returns the number of bytes written. If the decoded stream would need more
 /// space than `out_buffer`, returns a destination-too-small error instead of a
 /// truncated success.
+///
+/// `mem_limit_bytes` is the LZMA-Alone decoder memory limit in bytes (ignored for
+/// XZ and LZIP). Converted to KiB once at the `lzma-rust2` boundary.
 #[wasm_bindgen]
 pub fn decompress_to_buffer(
     compressed: &[u8],
     out_buffer: &mut [u8],
-    mem_limit: u32,
+    mem_limit_bytes: u32,
 ) -> Result<usize, JsValue> {
-    decompress_to_buffer_inner(compressed, out_buffer, mem_limit).map_err(to_js_err)
+    decompress_to_buffer_inner(compressed, out_buffer, mem_limit_bytes).map_err(to_js_err)
 }
 
 /// Decompress with dynamic growth, optionally capping decompressed output size.
 ///
 /// `max_output_size` is the maximum number of decompressed bytes. Pass `None`
-/// for no output-size cap. This is independent of `mem_limit`, which only
-/// applies to LZMA-Alone decoder memory.
+/// for no output-size cap. This is independent of `mem_limit_bytes`, which only
+/// applies to LZMA-Alone decoder memory and is expressed in bytes.
 #[wasm_bindgen]
 pub fn decompress_dynamic(
     compressed: &[u8],
-    mem_limit: u32,
+    mem_limit_bytes: u32,
     max_output_size: Option<u32>,
 ) -> Result<Vec<u8>, JsValue> {
-    decompress_dynamic_inner(compressed, mem_limit, max_output_size).map_err(to_js_err)
+    decompress_dynamic_inner(compressed, mem_limit_bytes, max_output_size).map_err(to_js_err)
 }
 
 #[wasm_bindgen]
@@ -1305,5 +1488,219 @@ mod tests {
             result = decoder.finish();
         }
         assert!(result.unwrap_err().contains("maxOutputSize"));
+    }
+
+    fn lzma_alone_header(props: u8, dict_size: u32, uncomp_size: u64) -> Vec<u8> {
+        let mut header = Vec::with_capacity(13);
+        header.push(props);
+        header.extend_from_slice(&dict_size.to_le_bytes());
+        header.extend_from_slice(&uncomp_size.to_le_bytes());
+        header
+    }
+
+    #[test]
+    fn lzma_memory_limit_uses_bytes_converted_to_kib() {
+        // props 0x5d => lc=3, lp=0, pb=2. An 8 MiB dictionary needs ~8214 KiB.
+        let header = lzma_alone_header(0x5d, 8 * 1024 * 1024, u64::MAX);
+
+        let err = decompress_dynamic_inner(&header, 1024 * 1024, None).unwrap_err();
+        assert!(
+            err.contains("needed memory too big for mem_limit_kb"),
+            "1 MiB byte limit must reject an 8 MiB dictionary at header parse, got: {err}"
+        );
+
+        // Truncated payload with a generous limit must fail for a different reason.
+        let truncated_err =
+            decompress_dynamic_inner(&header, 256 * 1024 * 1024, None).unwrap_err();
+        assert!(
+            !truncated_err.contains("needed memory too big for mem_limit_kb"),
+            "truncated stream should not be reported as mem_limit_kb, got: {truncated_err}"
+        );
+
+        assert_eq!(lzma_mem_limit_bytes_to_kb(1023), 0);
+        assert_eq!(lzma_mem_limit_bytes_to_kb(1024), 1);
+        assert_eq!(lzma_mem_limit_bytes_to_kb(256 * 1024 * 1024), 256 * 1024);
+    }
+
+    fn stream_encode_lzip(input: &[u8], chunk_size: usize) -> Result<Vec<u8>, String> {
+        let mut encoder = LzipStreamEncoderInner::new(3)?;
+        let mut output = Vec::new();
+        if !input.is_empty() {
+            for chunk in input.chunks(chunk_size.max(1)) {
+                output.extend(encoder.write(chunk)?);
+            }
+        }
+        output.extend(encoder.finish()?);
+        Ok(output)
+    }
+
+    fn stream_encode_lzma(input: &[u8], chunk_size: usize) -> Result<Vec<u8>, String> {
+        let mut encoder = LzmaStreamEncoderInner::new(3)?;
+        let mut output = Vec::new();
+        if !input.is_empty() {
+            for chunk in input.chunks(chunk_size.max(1)) {
+                output.extend(encoder.write(chunk)?);
+            }
+        }
+        output.extend(encoder.finish()?);
+        Ok(output)
+    }
+
+    #[test]
+    fn lzip_stream_encoder_roundtrips_across_chunk_sizes() {
+        let payload: Vec<u8> = (0..200_000).map(|index| (index % 251) as u8).collect();
+        for chunk_size in [1usize, 3, 7, 4093, 65536] {
+            let compressed = stream_encode_lzip(&payload, chunk_size)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            let output = decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            assert_eq!(output, payload, "chunk size {chunk_size}");
+        }
+    }
+
+    const LZIP_STREAM_HEADER_SIZE: usize = 6;
+    const LZMA_ALONE_STREAM_HEADER_SIZE: usize = 13;
+
+    #[test]
+    fn lzip_stream_encoder_emits_before_finish_and_handles_empty() {
+        let payload: Vec<u8> = (0..4 * 1024 * 1024)
+            .map(|index: usize| (index.wrapping_mul(0x9e37_79b9) >> 24) as u8)
+            .collect();
+        let mut encoder = LzipStreamEncoderInner::new(1).unwrap();
+        let mut before_finish = 0usize;
+        let mut compressed = Vec::new();
+        for chunk in payload.chunks(64 * 1024) {
+            let out = encoder.write(chunk).unwrap();
+            before_finish += out.len();
+            compressed.extend(out);
+        }
+        assert!(
+            before_finish > LZIP_STREAM_HEADER_SIZE,
+            "LZIP encoder should emit compressed payload bytes before finish (got {before_finish} bytes, header is {LZIP_STREAM_HEADER_SIZE})"
+        );
+        compressed.extend(encoder.finish().unwrap());
+        assert_eq!(
+            decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None).unwrap(),
+            payload
+        );
+
+        let empty = LzipStreamEncoderInner::new(1)
+            .unwrap()
+            .finish()
+            .unwrap();
+        assert!(
+            decompress_dynamic_inner(&empty, 256 * 1024 * 1024, None)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn lzma_stream_encoder_roundtrips_across_chunk_sizes() {
+        let payload: Vec<u8> = (0..200_000).map(|index| (index % 251) as u8).collect();
+        for chunk_size in [1usize, 3, 7, 4093, 65536] {
+            let compressed = stream_encode_lzma(&payload, chunk_size)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            let output = decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None)
+                .unwrap_or_else(|error| panic!("chunk size {chunk_size}: {error}"));
+            assert_eq!(output, payload, "chunk size {chunk_size}");
+        }
+    }
+
+    #[test]
+    fn lzma_stream_encoder_emits_before_finish_and_uses_unknown_size() {
+        let payload: Vec<u8> = (0..4 * 1024 * 1024)
+            .map(|index: usize| (index.wrapping_mul(0x517c_c1b7) >> 24) as u8)
+            .collect();
+        let mut encoder = LzmaStreamEncoderInner::new(1).unwrap();
+        let mut compressed = Vec::new();
+        let mut before_finish = 0usize;
+        for chunk in payload.chunks(64 * 1024) {
+            let out = encoder.write(chunk).unwrap();
+            before_finish += out.len();
+            compressed.extend(out);
+        }
+        assert!(
+            before_finish > LZMA_ALONE_STREAM_HEADER_SIZE,
+            "LZMA encoder should emit compressed payload bytes before finish (got {before_finish} bytes, header is {LZMA_ALONE_STREAM_HEADER_SIZE})"
+        );
+        compressed.extend(encoder.finish().unwrap());
+        assert_eq!(&compressed[5..13], &[0xff; 8]);
+        let output = decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None).unwrap();
+        assert_eq!(output, payload);
+    }
+
+    struct PausableReader {
+        data: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+        offset: std::cell::Cell<usize>,
+    }
+
+    impl Read for PausableReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let data = self.data.borrow();
+            let offset = self.offset.get();
+            if offset >= data.len() {
+                return Err(std::io::Error::from(ErrorKind::WouldBlock));
+            }
+            let count = (data.len() - offset).min(buf.len());
+            buf[..count].copy_from_slice(&data[offset..offset + count]);
+            self.offset.set(offset + count);
+            Ok(count)
+        }
+    }
+
+    fn drain_lzma_reader<R: Read>(
+        lzma: &mut LzmaReader<R>,
+        out: &mut Vec<u8>,
+    ) -> std::io::Result<()> {
+        let mut scratch = [0u8; 8192];
+        loop {
+            match lzma.read(&mut scratch) {
+                Ok(0) => return Ok(()),
+                Ok(n) => out.extend_from_slice(&scratch[..n]),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Feasibility gate: after a short read exhausts input, appending the rest
+    /// does not reliably resume into the same output as a single-pass decode.
+    #[test]
+    fn lzma_reader_pause_resume_does_not_reliably_decode() {
+        let payload: Vec<u8> = (0..128 * 1024).map(|index| (index % 251) as u8).collect();
+        let compressed = compress_lzma_inner(&payload, 1).unwrap();
+        assert!(compressed.len() > 40);
+        let split = 24usize;
+
+        let shared = std::rc::Rc::new(std::cell::RefCell::new(compressed[..split].to_vec()));
+        let pausable = PausableReader {
+            data: shared.clone(),
+            offset: std::cell::Cell::new(0),
+        };
+        let mut lzma = LzmaReader::new_mem_limit(
+            pausable,
+            lzma_mem_limit_bytes_to_kb(256 * 1024 * 1024),
+            None,
+        )
+        .expect("header should parse");
+
+        let mut resumed = Vec::new();
+        let _ = drain_lzma_reader(&mut lzma, &mut resumed);
+        shared.borrow_mut().extend_from_slice(&compressed[split..]);
+        let second = drain_lzma_reader(&mut lzma, &mut resumed);
+        if second.is_ok() && resumed == payload {
+            panic!(
+                "LzmaReader unexpectedly resumed after temporary input exhaustion; \
+                 true streaming decode may already be safe"
+            );
+        }
+
+        let control =
+            decompress_dynamic_inner(&compressed, 256 * 1024 * 1024, None).unwrap();
+        assert_eq!(control, payload);
+        assert_ne!(
+            resumed, payload,
+            "pause/resume output should not match full-stream decode"
+        );
     }
 }

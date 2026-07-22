@@ -34,6 +34,11 @@ function seededBytes(seed: string, length: number): Uint8Array {
   return out;
 }
 
+const STREAM_FORMAT_HEADER_BYTES = {
+  lzip: 6,
+  lzma: 13,
+} as const;
+
 describe("API correctness", () => {
   beforeAll(async () => {
     await initWasm();
@@ -109,18 +114,24 @@ describe("API correctness", () => {
     }
   }, 120_000);
 
-  it("validates incremental XZ compression options and lifecycle", () => {
+  it("validates incremental compression options and lifecycle", () => {
     expect(() => createEncoder({ level: -1 })).toThrow(/level/i);
     expect(() => createEncoder({ level: 10 })).toThrow(/level/i);
     expect(() =>
-      createEncoder({ format: "lzip" as unknown as "xz" }),
-    ).toThrow(/streaming format/i);
+      createEncoder({ format: "gzip" as unknown as "xz" }),
+    ).toThrow(/streaming encoder format/i);
     expect(() => createEncoder({ dictionarySize: 4095 })).toThrow(
       /dictionarySize/i,
     );
     expect(() =>
       createEncoder({ dictionarySize: 256 * 1024, blockSize: 128 * 1024 }),
     ).toThrow(/blockSize/i);
+    expect(() =>
+      createEncoder({ format: "lzip", dictionarySize: 64 * 1024 }),
+    ).toThrow(/dictionarySize.*lzip/i);
+    expect(() =>
+      createEncoder({ format: "lzma", blockSize: 64 * 1024 }),
+    ).toThrow(/blockSize.*lzma/i);
 
     const empty = createEncoder({ level: 1 });
     const compressed = empty.finish();
@@ -138,6 +149,73 @@ describe("API correctness", () => {
     );
     expect(() => invalid.write(new Uint8Array())).not.toThrow();
     invalid.close();
+  });
+
+  for (const format of ["lzip", "lzma"] as const) {
+    const headerSize = STREAM_FORMAT_HEADER_BYTES[format];
+
+    it(`incrementally compresses ${format} across chunk boundaries`, () => {
+      const data = seededBytes(`${format}-stream`, 512 * 1024);
+      const oneshot = compress(data, { format, level: 3 });
+
+      for (const chunkSize of [1, 7, 4093, 65536]) {
+        const encoder = createEncoder({ format, level: 3 });
+        const output: Uint8Array[] = [];
+        let beforeFinish = 0;
+        for (let offset = 0; offset < data.byteLength; offset += chunkSize) {
+          const chunk = encoder.write(data.subarray(offset, offset + chunkSize));
+          beforeFinish += chunk.byteLength;
+          output.push(chunk);
+        }
+        output.push(encoder.finish());
+        const compressed = concat(output);
+        expect(Buffer.from(decompress(compressed))).toEqual(Buffer.from(data));
+        if (format === "lzma") {
+          // Streaming LZMA uses unknown-size + EOS; one-shot uses known size.
+          expect(Buffer.from(compressed).equals(Buffer.from(oneshot))).toBe(false);
+        }
+        expect(beforeFinish).toBeGreaterThan(headerSize);
+      }
+    }, 120_000);
+
+    it(
+      `emits compressed payload before finish for multi-MiB incompressible ${format}`,
+      () => {
+        const data = seededBytes(`${format}-incompressible-4m`, 4 * 1024 * 1024);
+        const encoder = createEncoder({ format, level: 3 });
+        const chunks: Uint8Array[] = [];
+        let beforeFinish = 0;
+        for (let offset = 0; offset < data.byteLength; offset += 64 * 1024) {
+          const chunk = encoder.write(data.subarray(offset, offset + 64 * 1024));
+          beforeFinish += chunk.byteLength;
+          chunks.push(chunk);
+        }
+        expect(beforeFinish).toBeGreaterThan(headerSize);
+        chunks.push(encoder.finish());
+        expect(Buffer.from(decompress(concat(chunks)))).toEqual(Buffer.from(data));
+      },
+      120_000,
+    );
+  }
+
+  it("rejects oversized LZMA dictionary against byte-based lzmaMemoryLimit", () => {
+    // props 0x5d, 8 MiB dictionary, unknown size. Needs ~8214 KiB.
+    const header = new Uint8Array(13);
+    header[0] = 0x5d;
+    new DataView(header.buffer).setUint32(1, 8 * 1024 * 1024, true);
+    header.fill(0xff, 5);
+    expect(() =>
+      decompress(header, { lzmaMemoryLimit: 1024 * 1024 }),
+    ).toThrow(/needed memory too big for mem_limit_kb/i);
+
+    let truncatedError = "";
+    try {
+      decompress(header, { lzmaMemoryLimit: 256 * 1024 * 1024 });
+    } catch (error) {
+      truncatedError = String(error);
+    }
+    expect(truncatedError.length).toBeGreaterThan(0);
+    expect(truncatedError).not.toMatch(/needed memory too big for mem_limit_kb/i);
   });
 
   it("compresses XZ with a custom dictionary and multiple blocks", () => {
@@ -187,7 +265,7 @@ describe("API correctness", () => {
     expect(() => closed.write(new Uint8Array())).toThrow(/closed/i);
     expect(() =>
       createDecoder({ format: "lzip" as unknown as "xz" }),
-    ).toThrow(/streaming format/i);
+    ).toThrow(/not available/i);
   });
 
   it(
